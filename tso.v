@@ -15,3 +15,20 @@ Updated: 04/09/2014
 
 *)
 
+
+(* TODOS
+
+1. Copy the definitions from SF. Think about how much to copy.
+
+Should have write buffer, thread, lock, etc.
+
+thread: tid -> com, lockstatus may be lockid -> option tid.
+
+Paper: A better x86 memory model: x86-TSO
+
+*)
+
+
+Require Export Lib.
+
+
