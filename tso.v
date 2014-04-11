@@ -9,8 +9,11 @@ semantics.
 
 Written in Coq, mechanically formalized and verified.
 
-Andriy LIN
+Contraints:
+* It is only a simple language, so the only possible value is nat.
+* If var is not in memory, it will return 0 as default value, rather than None.
 
+Andriy LIN
 Updated: 04/09/2014
 
 *)
@@ -85,18 +88,18 @@ Hint Unfold Z.
 (* ---------------- end of Var ---------------- *)
 
 
-(* ---------------- State ---------------- *)
-Definition state := var -> nat.
+(* ---------------- Main Memory ---------------- *)
+Definition memory : Type := var -> nat.
 
-Definition empty_state : state := fun _ => 0.
+Definition empty_memory : memory := fun _ => 0.
 
-Definition update (st : state) (x : var) (n : nat) : state :=
-  fun x' => if eq_var_dec x x' then n else st x'.
+Definition update (mem : memory) (x : var) (n : nat) : memory :=
+  fun x' => if eq_var_dec x x' then n else mem x'.
 
 Hint Unfold update.
 
 Theorem update_eq :
-  forall n x st, (update st x n) x = n.
+  forall n x mem, (update mem x n) x = n.
 Proof with auto.
   intros.
   unfold update...
@@ -105,8 +108,8 @@ Qed.
 Hint Resolve update_eq.
 
 Theorem update_neq :
-  forall x2 x1 n st,
-    x2 <> x1 -> (update st x2 n) x1 = (st x1).
+  forall x2 x1 n mem,
+    x2 <> x1 -> (update mem x2 n) x1 = (mem x1).
 Proof with auto.
   intros.
   unfold update...
@@ -116,8 +119,8 @@ Hint Resolve update_neq.
 
 (* Due to most recent assignment, previous assignments are shadowed. *)
 Theorem update_shadow :
-  forall n1 n2 x1 x2 (st : state),
-    (update (update st x2 n1) x2 n2) x1 = (update st x2 n2) x1.
+  forall n1 n2 x1 x2 (mem : memory),
+    (update (update mem x2 n1) x2 n2) x1 = (update mem x2 n2) x1.
 Proof with auto.
   intros.
   unfold update...
@@ -127,9 +130,9 @@ Qed.
 Hint Resolve update_shadow.
 
 (* Update a variable to its current value won't "actually" change the state *)
-Theorem update_same : forall n1 x1 x2 (st : state),
-                        st x1 = n1 ->
-                        (update st x1 n1) x2 = st x2.
+Theorem update_same : forall n1 x1 x2 (mem : memory),
+                        mem x1 = n1 ->
+                        (update mem x1 n1) x2 = mem x2.
 Proof with auto.
   intros.
   unfold update...
@@ -141,9 +144,9 @@ Hint Resolve update_same.
 
 (* The order of update doesn't matter *)
 Theorem update_permute :
-  forall n1 n2 x1 x2 x3 st,
+  forall n1 n2 x1 x2 x3 mem,
     x2 <> x1 -> 
-    (update (update st x2 n1) x1 n2) x3 = (update (update st x1 n2) x2 n1) x3.
+    (update (update mem x2 n1) x1 n2) x3 = (update (update mem x1 n2) x2 n1) x3.
 Proof with auto.
   intros.
   unfold update...
@@ -154,7 +157,7 @@ Proof with auto.
 Qed.
 
 Hint Resolve update_permute.
-(* ---------------- end of State ---------------- *)
+(* ---------------- end of Main Memory ---------------- *)
 
 
 (* ---------------- Arithmatic Expressions ---------------- *)
@@ -468,7 +471,10 @@ Hint Unfold is_wp.
 
 
 (* ---------------- Smallstep Semantics ---------------- *)
-(* TODO Is this needed? *)
+(* TODO Is this needed?
+In other words, is the big-step style enough when each basic command
+is considered atomic.
+ *)
 (* ---------------- end of Smallstep Semantics ---------------- *)
 
 
