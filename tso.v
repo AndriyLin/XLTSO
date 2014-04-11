@@ -55,18 +55,18 @@ Defined.
 
 Hint Resolve eq_var_dec.
 
-Lemma eq_var : forall (T : Type) (x : var) (p q : T), 
-                 (if eq_var_dec x x then p else q) = p. 
+Lemma eq_var : forall (T : Type) (x : var) (p q : T),
+                 (if eq_var_dec x x then p else q) = p.
 Proof with auto.
   intros.
-  destruct (eq_var_dec x x); try reflexivity. 
+  destruct (eq_var_dec x x); try reflexivity.
   apply ex_falso_quodlibet...
 Qed.
 
 Hint Resolve eq_var.
 
 Lemma neq_var : forall (T : Type) (x y : var) (p q : T),
-                  x <> y -> (if eq_var_dec x y then p else q) = q. 
+                  x <> y -> (if eq_var_dec x y then p else q) = q.
 Proof with auto.
   intros.
   destruct (eq_var_dec x y)...
@@ -86,6 +86,61 @@ Hint Unfold Y.
 Hint Unfold Z.
 (* TODO Do I need to Hint Unfold X/Y/Z ?? *)
 (* ---------------- end of Var ---------------- *)
+
+
+(* ---------------- Thread ID ---------------- *)
+Inductive tid : Type :=
+| TID : nat -> tid.
+
+Hint Constructors tid.
+
+Theorem eq_tid_dec : forall t1 t2 : tid, {t1 = t2} + {t1 <> t2}.
+Proof with eauto.
+  intros...
+  destruct t1 as [n1].
+  destruct t2 as [n2].
+  destruct (eq_nat_dec n1 n2).
+  Case "n1 = n2".
+    left...
+  Case "n1 <> n2".
+    right.
+    intros Hf.
+    apply n.
+    inversion Hf...
+Defined.
+
+Hint Resolve eq_tid_dec.
+
+Lemma eq_tid : forall (T : Type) (t : tid) (p q : T),
+                 (if eq_tid_dec t t then p else q) = p.
+Proof with auto.
+  intros.
+  destruct (eq_tid_dec t t); try reflexivity.
+  apply ex_falso_quodlibet...
+Qed.
+
+Hint Resolve eq_tid.
+
+Lemma neq_tid : forall (T : Type) (t1 t2 : tid) (p q : T),
+                  t1 <> t2 -> (if eq_tid_dec t1 t2 then p else q) = q.
+Proof with auto.
+  intros.
+  destruct (eq_tid_dec t1 t2)...
+  Case "x = y".
+    apply H in e.
+    inversion e.
+Qed.
+
+Hint Resolve neq_tid.
+
+Definition T0 : tid := TID 0.
+Definition T1 : tid := TID 1.
+Definition T2 : tid := TID 2.
+
+Hint Unfold T0.
+Hint Unfold T1.
+Hint Unfold T2.
+(* ---------------- end of Thread ID ---------------- *)
 
 
 (* ---------------- Main Memory ---------------- *)
