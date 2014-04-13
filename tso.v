@@ -215,6 +215,83 @@ Hint Resolve update_permute.
 (* ---------------- end of Main Memory ---------------- *)
 
 
+(* ---------------- Lock ---------------- *)
+Inductive lid : Type :=
+| LockID : nat -> lid.
+
+Hint Constructors lid.
+
+Theorem eq_lid_dec : forall l1 l2 : lid, {l1 = l2} + {l1 <> l2}.
+Proof with auto.
+  intros.
+  destruct l1 as [n1].
+  destruct l2 as [n2].
+  destruct (eq_nat_dec n1 n2).
+  Case "n1 = n2".
+    left...
+  Case "n2 <> n2".
+    right.
+    intros Hf.
+    apply n.
+    inversion Hf...
+Defined.
+
+Hint Resolve eq_lid_dec.
+
+Lemma eq_lid : forall (T : Type) (x : lid) (p q : T),
+                 (if eq_lid_dec x x then p else q) = p.
+Proof with auto.
+  intros.
+  destruct (eq_lid_dec x x); try reflexivity.
+  apply ex_falso_quodlibet...
+Qed.
+
+Hint Resolve eq_lid.
+
+Lemma neq_lid : forall (T : Type) (x y : lid) (p q : T),
+                  x <> y -> (if eq_lid_dec x y then p else q) = q.
+Proof with auto.
+  intros.
+  destruct (eq_lid_dec x y)...
+  Case "x = y".
+    apply H in e.
+    inversion e.
+Qed.
+
+Hint Resolve neq_lid.
+
+Definition lock_status := lid -> option tid.
+Definition empty_locks : lock_status :=
+  fun _ => None.
+
+Hint Unfold empty_locks.
+
+Definition L0 : lid := LockID 0.
+Definition L1 : lid := LockID 1 .
+Definition L2 : lid := LockID 2.
+
+Hint Unfold L0.
+Hint Unfold L1.
+Hint Unfold L2.
+
+Definition lock (t : tid) (l : lid) (st : lock_status) : lock_status :=
+  match st l with
+    | None => fun l' => if eq_lid_dec l l' then Some t else st l'
+    | _ => st
+  end.
+
+Hint Unfold lock.
+
+Definition unlock (t : tid) (l : lid) (st : lock_status) : lock_status :=
+  match st l with
+    | Some t => fun l' => if eq_lid_dec l l' then None else st l'
+    | _ => st
+  end.
+
+Hint Unfold unlock.
+(* ---------------- end of Lock ---------------- *)
+
+
 (* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
@@ -533,3 +610,9 @@ is considered atomic.
 (* ---------------- end of Smallstep Semantics ---------------- *)
 
 
+(*
+   * Do I need to specify Registers in the formalization? Maybe not.
+   * Do I need to specify Barriers? I think yes. (in cmd)
+   * Also, what’s the differences between MFENCE, LFENCE, SFENCE?
+   * Do I need to use events to abstract like they do? Maybe not.
+*)
