@@ -339,13 +339,11 @@ Record state := ST {
   ls : lock_status
 }.
 
-(* TODO: Check how to use these kind of records.. *)
-
-Definition empty_state : state := {empty_memory; empty_buffers; empty_locks}.
-
+Definition empty_state := ST empty_memory empty_buffers empty_locks.
 (* ---------------- end of State ---------------- *)
 
 
+(* TODO: haven't updated the following definitions according to the new "state" *)
 (* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
