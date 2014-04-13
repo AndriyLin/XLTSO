@@ -331,6 +331,21 @@ Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
 (* ---------------- end of Write Buffer ---------------- *)
 
 
+(* ---------------- State ---------------- *)
+(* State consists of 3 parts: memory * buffers * locks *)
+Record state := ST {
+  mem : memory;
+  bs : buffer_status;
+  ls : lock_status
+}.
+
+(* TODO: Check how to use these kind of records.. *)
+
+Definition empty_state : state := {empty_memory; empty_buffers; empty_locks}.
+
+(* ---------------- end of State ---------------- *)
+
+
 (* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
