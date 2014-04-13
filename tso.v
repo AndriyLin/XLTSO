@@ -292,6 +292,45 @@ Hint Unfold unlock.
 (* ---------------- end of Lock ---------------- *)
 
 
+(* ---------------- Write Buffer ---------------- *)
+Definition buffer := list (var * nat).
+
+Definition buffer_status := tid -> buffer.
+Definition empty_buffers : buffer_status :=
+  fun _ => nil.
+
+Hint Unfold empty_buffers.
+
+(* TODO: Here I just enqueue, without removing any previous writes, is this enough? *)
+Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
+  fun t' => if eq_tid_dec t t'
+            then (x, n) :: bs t
+            else bs t.
+
+(* This is for retrieving the last one so as to update memory *)
+Fixpoint retrieve_last (b : buffer) : option (var * nat) :=
+  match b with
+    | nil => None
+    | hd :: nil => Some hd
+    | hd :: tl => retrieve_last tl
+  end.
+
+(* This is for flushing the last one in the write buffer *)
+Fixpoint remove_last (b : buffer) : buffer :=
+  match b with
+    | nil => nil
+    | [b'] => nil
+    | hd :: tl => hd :: remove_last tl
+  end.
+
+(* Flush out the last slot in the write buffer *)
+Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
+  fun t' => if eq_tid_dec t t'
+            then remove_last (bs t)
+            else bs t.
+(* ---------------- end of Write Buffer ---------------- *)
+
+
 (* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
