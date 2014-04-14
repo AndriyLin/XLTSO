@@ -262,7 +262,7 @@ Hint Unfold L0.
 Hint Unfold L1.
 Hint Unfold L2.
 
-Definition lock (t : tid) (l : lid) (st : lock_status) : lock_status :=
+Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   match st l with
     | None => fun l' => if eq_lid_dec l l' then Some t else st l'
     | _ => st
@@ -270,9 +270,11 @@ Definition lock (t : tid) (l : lid) (st : lock_status) : lock_status :=
 
 Hint Unfold lock.
 
-Definition unlock (t : tid) (l : lid) (st : lock_status) : lock_status :=
+Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   match st l with
-    | Some t => fun l' => if eq_lid_dec l l' then None else st l'
+    | Some t' => if eq_tid_dec t t'
+                 then fun l' => if eq_lid_dec l l' then None else st l'
+                 else st
     | _ => st
   end.
 
