@@ -21,17 +21,6 @@ Updated: 04/09/2014
 Require Export XLib.
 
 
-(* TODOS
-
-Should have write buffer, thread, lock, etc.
-
-thread: tid -> com, lockstatus may be lockid -> option tid.
-
-Paper: A better x86 memory model: x86-TSO
-
-*)
-
-
 (* ---------------- Var ---------------- *)
 Inductive var : Type :=
 | Var : nat -> var.
@@ -84,7 +73,6 @@ Definition Z : var := Var 2.
 Hint Unfold X.
 Hint Unfold Y.
 Hint Unfold Z.
-(* TODO Do I need to Hint Unfold X/Y/Z ?? *)
 (* ---------------- end of Var ---------------- *)
 
 
@@ -308,8 +296,6 @@ Fixpoint enqueue (b : buffer) (x : var) (n : nat) : buffer :=
     | hd :: tl => hd :: enqueue tl x n
   end.
 
-(* TODO: need test cases to try the correctness? *)
-
 Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
   fun t' => if eq_tid_dec t t'
             then enqueue (bs t) x n
@@ -496,12 +482,12 @@ Hint Resolve ceval_deterministic.
 (* ---------------- end of Commands ---------------- *)
 
 
+(* Equivalence chapter in SF may not be used later on.
+   It is likely for different kinds of optimization.
+   Also, I don't think Hoare Logic would be used in the proof.
+*)
 (* ---------------- Equivalence ---------------- *)
-(* TODO This may not be used later on.
-   And it is likely for different kinds of optimization. *)
 (* ---------------- end of Equivalence ---------------- *)
-
-
 (* ---------------- Hoare Logic ---------------- *)
 Definition Assertion := state -> Prop.
 
@@ -651,13 +637,9 @@ Hint Unfold is_wp.
 
 
 (* ---------------- Smallstep Semantics ---------------- *)
-(* TODO Is this needed?
-In other words, is the big-step style enough when each basic command
-is considered atomic.
-
-I think yes.. the semantics should be stated in a small-step way to be
-used in parallel environment.
-
+(*
+TODO: Change the operational semantics to this smallstep semantics
+It's better in an parallel environment.
  *)
 (* ---------------- end of Smallstep Semantics ---------------- *)
 
@@ -668,4 +650,13 @@ Doubts:
 * What's the difference between MFENCE, LFENCE, SFENCE.
 * Do I need to use events to abstract? maybe yes, I may define that:
     two xx are equiv if they have the same sequence of events
+*)
+
+
+(*
+TODOs:
+1. Add test cases (Example) to check the correctness of each definition above.
+2. Will Hoare Logic be used in the project? I am not sure.
+3. Do I need to extend the language to contain Lambda?
+*)
 
