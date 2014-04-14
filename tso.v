@@ -293,6 +293,7 @@ Hint Unfold unlock.
 
 
 (* ---------------- Write Buffer ---------------- *)
+(* In the buffer: [old ... new] new writes are appended to the right *)
 Definition buffer := list (var * nat).
 
 Definition buffer_status := tid -> buffer.
@@ -301,32 +302,26 @@ Definition empty_buffers : buffer_status :=
 
 Hint Unfold empty_buffers.
 
-(* TODO: Here I just enqueue, without removing any previous writes, is this enough? *)
+Fixpoint enqueue (b : buffer) (x : var) (n : nat) : buffer :=
+  match b with
+    | nil => [(x, n)]
+    | hd :: tl => hd :: enqueue tl x n
+  end.
+
+(* TODO: need test cases to try the correctness? *)
+
 Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
   fun t' => if eq_tid_dec t t'
-            then (x, n) :: bs t
+            then enqueue (bs t) x n
             else bs t.
 
-(* This is for retrieving the last one so as to update memory *)
-Fixpoint retrieve_last (b : buffer) : option (var * nat) :=
-  match b with
-    | nil => None
-    | hd :: nil => Some hd
-    | hd :: tl => retrieve_last tl
-  end.
+(* Retrieve the "last", i.e. the oldest one in the buffer *)
+Definition retrieve (bs : buffer_status) (t : tid) : option (var * nat) :=
+  hd (bs t).
 
-(* This is for flushing the last one in the write buffer *)
-Fixpoint remove_last (b : buffer) : buffer :=
-  match b with
-    | nil => nil
-    | [b'] => nil
-    | hd :: tl => hd :: remove_last tl
-  end.
-
-(* Flush out the last slot in the write buffer *)
 Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
   fun t' => if eq_tid_dec t t'
-            then remove_last (bs t)
+            then tl (bs t)
             else bs t.
 (* ---------------- end of Write Buffer ---------------- *)
 
@@ -340,6 +335,7 @@ Record state := ST {
 }.
 
 Definition empty_state := ST empty_memory empty_buffers empty_locks.
+
 (* ---------------- end of State ---------------- *)
 
 
@@ -658,13 +654,18 @@ Hint Unfold is_wp.
 (* TODO Is this needed?
 In other words, is the big-step style enough when each basic command
 is considered atomic.
+
+I think yes.. the semantics should be stated in a small-step way to be
+used in parallel environment.
+
  *)
 (* ---------------- end of Smallstep Semantics ---------------- *)
 
-
 (*
-   * Do I need to specify Registers in the formalization? Maybe not.
-   * Do I need to specify Barriers? I think yes. (in cmd)
-   * Also, what’s the differences between MFENCE, LFENCE, SFENCE?
-   * Do I need to use events to abstract like they do? Maybe not.
-*)
+Doubts:
+* Do I need to specify Registers?? maybe not.
+* Do I need to specify Barriers?? I think so.
+* What's the difference between MFENCE, LFENCE, SFENCE.
+* Do I need to use events to abstract? maybe yes, I may define that:
+    two xx are equiv if they have the same sequence of events
+

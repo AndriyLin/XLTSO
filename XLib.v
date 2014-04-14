@@ -86,3 +86,10 @@ Fixpoint ble_nat (n m : nat) : bool :=
               end
   end.
 
+
+Definition hd {X} (l : list X) : option X :=
+  match l with
+    | nil => None
+    | hd :: _ => Some hd
+  end.
+
