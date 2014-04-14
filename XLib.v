@@ -61,6 +61,14 @@ Tactic Notation "solve" "by" "inversion" :=
   solve by inversion 1.
 
 
+Ltac inv H := inversion H; subst; clear H.
+Ltac rwinv H1 H2 := rewrite H1 in H2; inv H2.
+Ltac find_rwinv :=
+  match goal with
+      H1: ?E = true, H2: ?E = false |- _ => rwinv H1 H2
+  end.
+
+
 Theorem ex_falso_quodlibet:
   forall (P:Prop), False -> P.
 Proof.
