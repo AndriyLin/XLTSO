@@ -395,9 +395,9 @@ Hint Unfold empty_threads.
 (* ---------------- 7. State ---------------- *)
 (* state consists of 3 parts: threads (i.e. buffer + cmd) * locks * memory *)
 Record state := ST {
-  ts : threads;
-  ls : lock_status;
-  mem : memory
+  st_ts : threads;
+  st_ls : lock_status;
+  st_mem : memory
 }.
 
 Definition empty_state := ST empty_threads empty_locks empty_memory.
@@ -405,27 +405,33 @@ Definition empty_state := ST empty_threads empty_locks empty_memory.
 
 
 (* ---------------- 8. Evaluation & Semantics ---------------- *)
-(* TODO: refine from here *)
-Fixpoint aeval (st : state) (a : aexp) : nat :=
+(* Only memory & buffer information is needed *)
+Fixpoint aeval (mem : memory) (buf : buffer) (a : aexp) : nat :=
   match a with
     | ANum n => n
-    | APlus a1 a2 => (aeval st a1) + (aeval st a2)
-    | AMinus a1 a2 => (aeval st a1) - (aeval st a2)
-    | AMult a1 a2 => (aeval st a1) * (aeval st a2)
-    | AVar x => st x
+    | APlus a1 a2 => (aeval mem buf a1) + (aeval mem buf a2)
+    | AMinus a1 a2 => (aeval mem buf a1) - (aeval mem buf a2)
+    | AMult a1 a2 => (aeval mem buf a1) * (aeval mem buf a2)
+    | AVar x => match get buf x with
+                  | None => mem x
+                  | Some n => n
+                end
   end.
 
-Fixpoint beval (st : state) (b : bexp) : bool :=
+(* Only memory & buffer information is needed *)
+Fixpoint beval (mem : memory) (buf : buffer) (b : bexp) : bool :=
   match b with
     | BTrue => true
     | BFalse => false
-    | BNot b' => negb (beval st b')
-    | BAnd b1 b2 => andb (beval st b2) (beval st b2)
-    | BOr b1 b2 => orb (beval st b1) (beval st b2)
-    | BEq a1 a2 => beq_nat (aeval st a1) (aeval st a2)
-    | BLe a1 a2 => ble_nat (aeval st a1) (aeval st a2)
+    | BNot b' => negb (beval mem buf b')
+    | BAnd b1 b2 => andb (beval mem buf b1) (beval mem buf b2)
+    | BOr b1 b2 => orb (beval mem buf b1) (beval mem buf b2)
+    | BEq a1 a2 => beq_nat (aeval mem buf a1) (aeval mem buf a2)
+    | BLe a1 a2 => ble_nat (aeval mem buf a1) (aeval mem buf a2)
   end.
 
+
+(* TODO Resume here *)
 Reserved Notation "c1 '/' st '||' st'" (at level 40, st at level 39).
 
 Inductive ceval : cmd -> state -> state -> Prop :=
