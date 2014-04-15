@@ -16,12 +16,23 @@ Contraints:
 Andriy LIN
 Updated: 04/09/2014
 
+
+Structure:
+1. Variable
+2. Main memory
+3. Arithmatic / Boolean Expressions & Commands
+4. Thread ID
+5. LockID and Locks
+6. Write Buffers & Threads
+7. State
+8. Evaluation & Semantics
+9. TODO..
 *)
 
 Require Export XLib.
 
 
-(* ---------------- Var ---------------- *)
+(* ---------------- 1. Var ---------------- *)
 Inductive var : Type :=
 | Var : nat -> var.
 
@@ -73,65 +84,10 @@ Definition Z : var := Var 2.
 Hint Unfold X.
 Hint Unfold Y.
 Hint Unfold Z.
-(* ---------------- end of Var ---------------- *)
+(* ---------------- end of 1. Var ---------------- *)
 
 
-(* ---------------- Thread ID ---------------- *)
-Inductive tid : Type :=
-| TID : nat -> tid.
-
-Hint Constructors tid.
-
-Theorem eq_tid_dec : forall t1 t2 : tid, {t1 = t2} + {t1 <> t2}.
-Proof with eauto.
-  intros...
-  destruct t1 as [n1].
-  destruct t2 as [n2].
-  destruct (eq_nat_dec n1 n2).
-  Case "n1 = n2".
-    left...
-  Case "n1 <> n2".
-    right.
-    intros Hf.
-    apply n.
-    inversion Hf...
-Defined.
-
-Hint Resolve eq_tid_dec.
-
-Lemma eq_tid : forall (T : Type) (t : tid) (p q : T),
-                 (if eq_tid_dec t t then p else q) = p.
-Proof with auto.
-  intros.
-  destruct (eq_tid_dec t t); try reflexivity.
-  apply ex_falso_quodlibet...
-Qed.
-
-Hint Resolve eq_tid.
-
-Lemma neq_tid : forall (T : Type) (t1 t2 : tid) (p q : T),
-                  t1 <> t2 -> (if eq_tid_dec t1 t2 then p else q) = q.
-Proof with auto.
-  intros.
-  destruct (eq_tid_dec t1 t2)...
-  Case "x = y".
-    apply H in e.
-    inversion e.
-Qed.
-
-Hint Resolve neq_tid.
-
-Definition T0 : tid := TID 0.
-Definition T1 : tid := TID 1.
-Definition T2 : tid := TID 2.
-
-Hint Unfold T0.
-Hint Unfold T1.
-Hint Unfold T2.
-(* ---------------- end of Thread ID ---------------- *)
-
-
-(* ---------------- Main Memory ---------------- *)
+(* ---------------- 2. Main Memory ---------------- *)
 Definition memory : Type := var -> nat.
 
 Definition empty_memory : memory := fun _ => 0.
@@ -200,10 +156,127 @@ Proof with auto.
 Qed.
 
 Hint Resolve update_permute.
-(* ---------------- end of Main Memory ---------------- *)
+(* ---------------- end of 2. Main Memory ---------------- *)
 
 
-(* ---------------- Lock ---------------- *)
+(* ---------------- 3. A/B Expressions & Command ---------------- *)
+Inductive aexp : Type :=
+| ANum : nat -> aexp
+| APlus : aexp -> aexp -> aexp
+| AMinus : aexp -> aexp -> aexp
+| AMult : aexp -> aexp -> aexp
+| AVar : var -> aexp.
+
+Hint Constructors aexp.
+
+Tactic Notation "aexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "ANum" | Case_aux c "APlus"
+  | Case_aux c "AMinus" | Case_aux c "AMult"
+  | Case_aux c "AVar" ].
+
+
+Inductive bexp : Type :=
+| BTrue : bexp
+| BFalse : bexp
+| BNot : bexp -> bexp
+| BAnd : bexp -> bexp -> bexp
+| BOr : bexp -> bexp -> bexp
+| BEq : aexp -> aexp -> bexp
+| BLe : aexp -> aexp -> bexp.
+
+Hint Constructors bexp.
+
+Tactic Notation "bexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "BTrue" | Case_aux c "BFalse" | Case_aux c "BNot"
+  | Case_aux c "BAnd" | Case_aux c "BOr" | Case_aux c "BEq"
+  | Case_aux c "BLe" ].
+
+
+Inductive cmd : Type :=
+| CSkip : cmd
+| CAss : var -> aexp -> cmd
+| CSeq : cmd -> cmd -> cmd
+| CIf : bexp -> cmd -> cmd -> cmd
+| CWhile : bexp -> cmd -> cmd.
+
+Hint Constructors cmd.
+
+Tactic Notation "cmd_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "SKIP" | Case_aux c "::=" | Case_aux c ";;"
+  | Case_aux c "IFB" | Case_aux c "WHILE" ].
+
+Notation "'SKIP'" :=
+  CSkip.
+Notation "x '::=' a" :=
+  (CAss x a) (at level 60).
+Notation "c1 ;; c2" :=
+  (CSeq c1 c2) (at level 80, right associativity).
+Notation "'WHILE' b 'DO' c 'END'" :=
+  (CWhile b c) (at level 80, right associativity).
+Notation "'IFB' b 'THEN' c1 'ELSE' c2 'FI'" :=
+  (CIf b c1 c2) (at level 80, right associativity).
+(* ---------------- end of 3. A/B Expressions & Command ---------------- *)
+
+
+(* ---------------- 4. Thread ID ---------------- *)
+Inductive tid : Type :=
+| TID : nat -> tid.
+
+Hint Constructors tid.
+
+Theorem eq_tid_dec : forall t1 t2 : tid, {t1 = t2} + {t1 <> t2}.
+Proof with eauto.
+  intros...
+  destruct t1 as [n1].
+  destruct t2 as [n2].
+  destruct (eq_nat_dec n1 n2).
+  Case "n1 = n2".
+    left...
+  Case "n1 <> n2".
+    right.
+    intros Hf.
+    apply n.
+    inversion Hf...
+Defined.
+
+Hint Resolve eq_tid_dec.
+
+Lemma eq_tid : forall (T : Type) (t : tid) (p q : T),
+                 (if eq_tid_dec t t then p else q) = p.
+Proof with auto.
+  intros.
+  destruct (eq_tid_dec t t); try reflexivity.
+  apply ex_falso_quodlibet...
+Qed.
+
+Hint Resolve eq_tid.
+
+Lemma neq_tid : forall (T : Type) (t1 t2 : tid) (p q : T),
+                  t1 <> t2 -> (if eq_tid_dec t1 t2 then p else q) = q.
+Proof with auto.
+  intros.
+  destruct (eq_tid_dec t1 t2)...
+  Case "x = y".
+    apply H in e.
+    inversion e.
+Qed.
+
+Hint Resolve neq_tid.
+
+Definition T0 : tid := TID 0.
+Definition T1 : tid := TID 1.
+Definition T2 : tid := TID 2.
+
+Hint Unfold T0.
+Hint Unfold T1.
+Hint Unfold T2.
+(* ---------------- end of 4. Thread ID ---------------- *)
+
+
+(* ---------------- 5. Lock ---------------- *)
 Inductive lid : Type :=
 | LockID : nat -> lid.
 
@@ -248,12 +321,6 @@ Qed.
 
 Hint Resolve neq_lid.
 
-Definition lock_status := lid -> option tid.
-Definition empty_locks : lock_status :=
-  fun _ => None.
-
-Hint Unfold empty_locks.
-
 Definition L0 : lid := LockID 0.
 Definition L1 : lid := LockID 1 .
 Definition L2 : lid := LockID 2.
@@ -262,88 +329,83 @@ Hint Unfold L0.
 Hint Unfold L1.
 Hint Unfold L2.
 
+
+Definition lock_status := lid -> option tid.
+Definition empty_locks : lock_status :=
+  fun _ => None.
+
+Hint Unfold empty_locks.
+
+(* Checking of validity is left to semantics, not done here *)
 Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
-  match st l with
-    | None => fun l' => if eq_lid_dec l l' then Some t else st l'
-    | _ => st
-  end.
+  fun l' => if eq_lid_dec l l' then Some t else st l'.
 
 Hint Unfold lock.
 
+(* Again, checking of validity is not done here, it's left to semantics *)
 Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
-  match st l with
-    | Some t' => if eq_tid_dec t t'
-                 then fun l' => if eq_lid_dec l l' then None else st l'
-                 else st
-    | _ => st
-  end.
+  fun l' => if eq_lid_dec l l' then None else st l'.
 
 Hint Unfold unlock.
-(* ---------------- end of Lock ---------------- *)
+(* ---------------- end of 5. Lock ---------------- *)
 
 
-(* ---------------- Write Buffer ---------------- *)
-(* In the buffer: [old ... new] new writes are appended to the right *)
-Definition buffer := list (var * nat).
+(* ---------------- 6. Write Buffer & Threads ---------------- *)
+(* In the buffer: [old ... new], new writes are appended to the right *)
+Definition buffer : Type := list (var * nat).
 
-Definition buffer_status := tid -> buffer.
-Definition empty_buffers : buffer_status :=
-  fun _ => nil.
-
-Hint Unfold empty_buffers.
-
-Fixpoint enqueue (b : buffer) (x : var) (n : nat) : buffer :=
+(* Add a new write to the end of buffer *)
+Fixpoint write (b : buffer) (x : var) (n : nat) : buffer :=
   match b with
     | nil => [(x, n)]
-    | hd :: tl => hd :: enqueue tl x n
+    | hd :: tl => hd :: write tl x n
   end.
 
-Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
-  fun t' => if eq_tid_dec t t'
-            then enqueue (bs t) x n
-            else bs t.
+(* get the oldest write in the buffer *)
+Definition lastone (b : buffer) : option (var * nat) :=
+  hd b.
 
-(* Retrieve the "last", i.e. the oldest one in the buffer *)
-Definition retrieve (bs : buffer_status) (t : tid) : option (var * nat) :=
-  hd (bs t).
+(* remove the oldest write in the buffer *)
+Fixpoint flush (b : buffer) : buffer :=
+  tl b.
 
-Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
-  fun t' => if eq_tid_dec t t'
-            then tl (bs t)
-            else bs t.
-(* ---------------- end of Write Buffer ---------------- *)
+(* the helper function for get *)
+Fixpoint _get (b : buffer) (x : var) (result : option nat) : option nat :=
+  match b with
+    | nil => result
+    | (k, v) :: tl => if eq_var_dec x k
+                      then _get tl x (Some v)
+                      else _get tl x result
+  end.
+
+(* get the latest value of some variable in the buffer, if any *)
+Fixpoint get (b : buffer) (x : var) : option nat :=
+  _get b x None.
 
 
-(* ---------------- State ---------------- *)
-(* State consists of 3 parts: memory * buffers * locks *)
+Definition threads := tid -> (buffer * cmd).
+
+Definition empty_threads : threads :=
+  fun _ => ([], SKIP).
+
+Hint Unfold empty_threads.
+(* ---------------- end of 6. Write Buffer & Threads ---------------- *)
+
+
+(* ---------------- 7. State ---------------- *)
+(* state consists of 3 parts: threads (i.e. buffer + cmd) * locks * memory *)
 Record state := ST {
-  mem : memory;
-  bs : buffer_status;
-  ls : lock_status
+  ts : threads;
+  ls : lock_status;
+  mem : memory
 }.
 
-Definition empty_state := ST empty_memory empty_buffers empty_locks.
+Definition empty_state := ST empty_threads empty_locks empty_memory.
+(* ---------------- end of 7. State ---------------- *)
 
-(* ---------------- end of State ---------------- *)
 
-
-(* TODO: haven't updated the following definitions according to the new "state" *)
-(* ---------------- Arithmatic Expressions ---------------- *)
-Inductive aexp : Type :=
-| ANum : nat -> aexp
-| APlus : aexp -> aexp -> aexp
-| AMinus : aexp -> aexp -> aexp
-| AMult : aexp -> aexp -> aexp
-| AVar : var -> aexp.
-
-Hint Constructors aexp.
-
-Tactic Notation "aexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "ANum" | Case_aux c "APlus"
-  | Case_aux c "AMinus" | Case_aux c "AMult"
-  | Case_aux c "AVar" ].
-
+(* ---------------- 8. Evaluation & Semantics ---------------- *)
+(* TODO: refine from here *)
 Fixpoint aeval (st : state) (a : aexp) : nat :=
   match a with
     | ANum n => n
@@ -352,26 +414,6 @@ Fixpoint aeval (st : state) (a : aexp) : nat :=
     | AMult a1 a2 => (aeval st a1) * (aeval st a2)
     | AVar x => st x
   end.
-(* ---------------- end of Arithmatic Expressions ---------------- *)
-
-
-(* ---------------- Boolean Expressions ---------------- *)
-Inductive bexp : Type :=
-| BTrue : bexp
-| BFalse : bexp
-| BNot : bexp -> bexp
-| BAnd : bexp -> bexp -> bexp
-| BOr : bexp -> bexp -> bexp
-| BEq : aexp -> aexp -> bexp
-| BLe : aexp -> aexp -> bexp.
-
-Hint Constructors bexp.
-
-Tactic Notation "bexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "BTrue" | Case_aux c "BFalse" | Case_aux c "BNot"
-  | Case_aux c "BAnd" | Case_aux c "BOr" | Case_aux c "BEq"
-  | Case_aux c "BLe" ].
 
 Fixpoint beval (st : state) (b : bexp) : bool :=
   match b with
@@ -383,34 +425,6 @@ Fixpoint beval (st : state) (b : bexp) : bool :=
     | BEq a1 a2 => beq_nat (aeval st a1) (aeval st a2)
     | BLe a1 a2 => ble_nat (aeval st a1) (aeval st a2)
   end.
-(* ---------------- end of Boolean Expressions ---------------- *)
-
-
-(* ---------------- Commands ---------------- *)
-Inductive cmd : Type :=
-| CSkip : cmd
-| CAss : var -> aexp -> cmd
-| CSeq : cmd -> cmd -> cmd
-| CIf : bexp -> cmd -> cmd -> cmd
-| CWhile : bexp -> cmd -> cmd.
-
-Hint Constructors cmd.
-
-Tactic Notation "cmd_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "SKIP" | Case_aux c "::=" | Case_aux c ";;"
-  | Case_aux c "IFB" | Case_aux c "WHILE" ].
-
-Notation "'SKIP'" :=
-  CSkip.
-Notation "x '::=' a" :=
-  (CAss x a) (at level 60).
-Notation "c1 ;; c2" :=
-  (CSeq c1 c2) (at level 80, right associativity).
-Notation "'WHILE' b 'DO' c 'END'" :=
-  (CWhile b c) (at level 80, right associativity).
-Notation "'IFB' b 'THEN' c1 'ELSE' c2 'FI'" :=
-  (CIf b c1 c2) (at level 80, right associativity).
 
 Reserved Notation "c1 '/' st '||' st'" (at level 40, st at level 39).
 
@@ -452,12 +466,6 @@ Tactic Notation "ceval_cases" tactic(first) ident(c) :=
   | Case_aux c "CE_IfFalse" | Case_aux c "CE_WhileEnd"
   | Case_aux c "CE_WhileLoop" ].
 
-Ltac inv H := inversion H; subst; clear H.
-Ltac rwinv H1 H2 := rewrite H1 in H2; inv H2.
-Ltac find_rwinv :=
-  match goal with
-      H1: ?E = true, H2: ?E = false |- _ => rwinv H1 H2
-  end.
 
 Theorem ceval_deterministic:
   forall c st st1 st2,
@@ -481,7 +489,7 @@ Proof with auto.
 Qed.
 
 Hint Resolve ceval_deterministic.
-(* ---------------- end of Commands ---------------- *)
+(* ---------------- end of 8. Evaluation & Semantics ---------------- *)
 
 
 (* Equivalence chapter in SF may not be used later on.
@@ -645,9 +653,10 @@ It's better in an parallel environment.
  *)
 (* ---------------- end of Smallstep Semantics ---------------- *)
 
+
 (*
 Doubts:
-* Do I need to specify Registers?? maybe not.
+* Do I need to specify Registers?? No.
 * Do I need to specify Barriers?? I think so.
 * What's the difference between MFENCE, LFENCE, SFENCE.
 * Do I need to use events to abstract? maybe yes, I may define that:
