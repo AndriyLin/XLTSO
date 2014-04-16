@@ -282,11 +282,25 @@ Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 
 Hint Unfold lock.
 
+Theorem lock_correctness:
+  forall st t l, (lock st t l) l = Some t.
+Proof with auto.
+  intros.
+  unfold lock...
+Qed.
+
 (* Again, checking of validity is not done here, it's left to semantics *)
 Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   fun l' => if eq_lid_dec l l' then None else st l'.
 
 Hint Unfold unlock.
+
+Theorem unlock_correctness:
+  forall st t l, (unlock st t l) l = None.
+Proof with auto.
+  intros.
+  unfold unlock...
+Qed.
 (* ---------------- end of Lock ---------------- *)
 
 
@@ -413,10 +427,9 @@ Inductive astep : tid -> aexp -> state -> aexp -> Prop :=
 | AS_VarBuf : forall t x bs mem ls n,
                 get bs t x = Some n ->
                 t @ (AVar x) ~ (ST bs mem ls) ==A> (ANum n)
-| AS_VarMem : forall t x bs mem ls n,
+| AS_VarMem : forall t x bs mem ls,
                 get bs t x = None ->
-                mem x = n ->
-                t @ (AVar x) ~ (ST bs mem ls) ==A> (ANum n)
+                t @ (AVar x) ~ (ST bs mem ls) ==A> (ANum (mem x))
 
 where "t '@' a1 '~' st '==A>' a2" := (astep t a1 st a2).
 
@@ -428,6 +441,36 @@ Tactic Notation "astep_cases" tactic(first) ident(c) :=
   | Case_aux c "AS_Minus" | Case_aux c "AS_Minus1" | Case_aux c "AS_Minus2"
   | Case_aux c "AS_Mult" | Case_aux c "AS_Mult1" | Case_aux c "AS_Mult2"
   | Case_aux c "AS_VarBuf" | Case_aux c "AS_VarMem" ].
+
+Theorem strong_progress_a :
+  forall a t st, avalue a \/ (exists a', t @ a ~ st ==A> a').
+Proof with eauto.
+  intros.
+  aexp_cases (induction a) Case;
+    simpl...
+  Case "APlus".
+    right. inv IHa1.
+    SCase "avalue a1". inv IHa2.
+      SSCase "avalue a2". inv H. inv H0...
+      SSCase "a2 ==A> a2'". inv H0...
+    SCase "a1 ==A> a1'". inv H...
+  Case "AMinus".
+    right. inv IHa1.
+    SCase "avalue a1". inv IHa2.
+      SSCase "avalue a2". inv H. inv H0...
+      SSCase "a2 ==A> a2'". inv H0...
+    SCase "a1 ==A> a1'". inv H...
+  Case "AMult".
+    right. inv IHa1.
+    SCase "avalue a1". inv IHa2.
+      SSCase "avalue a2". inv H. inv H0...
+      SSCase "a2 ==A> a2'". inv H0...
+    SCase "a1 ==A> a1'". inv H...
+  Case "AVar".
+    right.
+    destruct st as [bs mem ls].
+    destruct (get bs t v) eqn:Hbs...
+Qed.
 (* ---------------- end of Arithmatic Expressions ---------------- *)
 
 
@@ -504,6 +547,42 @@ Tactic Notation "bstep_cases" tactic(first) ident(c) :=
   | Case_aux c "BS_And" | Case_aux c "BS_And1" | Case_aux c "BS_And2"
   | Case_aux c "BS_Eq" | Case_aux c "BS_Eq1" | Case_aux c "BS_Eq2"
   | Case_aux c "BS_Le" | Case_aux c "BS_Le1" | Case_aux c "BS_Le2" ].
+
+Theorem strong_progress_b :
+  forall b t st, bvalue b \/ (exists b', t @ b ~ st ==B> b').
+Proof with eauto.
+  intros.
+  bexp_cases (induction b) Case;
+    simpl...
+  Case "BNot".
+    right. inv IHb.
+    inv H...
+    inv H...
+  Case "BAnd".
+    right. inv IHb1; inv IHb2...
+    inv H; inv H0...
+    inv H0...
+    inv H...
+    inv H; inv H0...
+  Case "BEq".
+    right; rename a into a1; rename a0 into a2.
+    destruct (strong_progress_a a1 t st).
+    SCase "avalue a1".
+      destruct (strong_progress_a a2 t st).
+      inv H; inv H0...
+      inv H0...
+    SCase "a1 ==A> a1'".
+      inv H...
+  Case "BLe".
+    right; rename a into a1; rename a0 into a2.
+    destruct (strong_progress_a a1 t st).
+    SCase "avalue a1".
+      destruct (strong_progress_a a2 t st).
+      inv H; inv H0...
+      inv H0...
+    SCase "a1 ==A> a1'".
+      inv H...
+Qed.
 (* ---------------- end of Boolean Expressions ---------------- *)
 
 
