@@ -219,6 +219,7 @@ Hint Unfold T2.
 (* ---------------- Lock ---------------- *)
 Inductive lid : Type :=
 | LockID : nat -> lid.
+(* TODO: do I need to change lid to "var -> lid"?? *)
 
 Hint Constructors lid.
 
@@ -415,6 +416,7 @@ TODO: I don't know how to specify the thread ID of a cmd, so I
 | CBar : fence -> cmd (* Barrier *)
 | CLock : lid -> cmd
 | CUnlock : lid -> cmd
+(* CAtomic?? *)
 .
 
 Hint Constructors cmd.
