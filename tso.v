@@ -14,7 +14,7 @@ Contraints:
 * If var is not in memory, it will return 0 as default value, rather than None.
 
 Andriy LIN
-Updated: 04/09/2014
+Updated: 04/16/2014
 
 
 Structure:
@@ -282,7 +282,7 @@ Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 
 Hint Unfold lock.
 
-Theorem lock_correctness:
+Theorem test_lock_correctness:
   forall st t l, (lock st t l) l = Some t.
 Proof with auto.
   intros.
@@ -295,7 +295,7 @@ Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 
 Hint Unfold unlock.
 
-Theorem unlock_correctness:
+Theorem test_unlock_correctness:
   forall st t l, (unlock st t l) l = None.
 Proof with auto.
   intros.
@@ -319,15 +319,29 @@ Fixpoint _write (b : buffer) (x : var) (n : nat) : buffer :=
     | h :: t => h :: _write t x n
   end.
 
+Hint Unfold _write.
+
 (* Add a new write to the end of buffer *)
 Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
   fun t' => if eq_tid_dec t t'
             then _write (bs t) x n
             else bs t'.
 
+Hint Unfold write.
+
 (* get the oldest write in the buffer *)
 Definition oldest (bs : buffer_status) (t : tid) : option (var * nat) :=
   hd (bs t).
+
+Hint Unfold oldest.
+
+Theorem test_write_correctness:
+  forall t x n, oldest (write empty_buffers t x n) t = Some (x, n).
+Proof with auto.
+  intros.
+  unfold write, oldest.
+  rewrite -> eq_tid...
+Qed.
 
 (* remove the oldest write in the buffer *)
 Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
@@ -335,18 +349,51 @@ Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
             then tl (bs t)
             else bs t'.
 
-(* the helper function for get *)
-Fixpoint _get (b : buffer) (x : var) (result : option nat) : option nat :=
+Hint Unfold flush.
+
+Theorem test_flush_correctness:
+  forall t x n, flush (write empty_buffers t x n) t = empty_buffers.
+Proof with auto.
+  intros.
+  apply functional_extensionality.
+  intros t'.
+  unfold flush, write, empty_buffers.
+  rewrite -> eq_tid.
+  destruct (eq_tid_dec t t')...
+Qed.
+
+(* the helper function for get, the accumulator version is not useful in proof *)
+Fixpoint _get (b : buffer) (x : var) : option nat :=
   match b with
-    | nil => result
-    | (k, v) :: t => if eq_var_dec x k
-                     then _get t x (Some v)
-                     else _get t x result
+    | nil => None
+    | (k, v) :: t => match _get t x with
+                       | None => if eq_var_dec x k
+                                 then Some v
+                                 else None
+                       | r => r
+                     end
   end.
+
+Hint Unfold _get.
 
 (* get the latest value of some variable in the buffer, if any *)
 Definition get (bs : buffer_status) (t : tid) (x : var) : option nat :=
-  _get (bs t) x None.
+  _get (bs t) x.
+
+Theorem test_get_correctness:
+  forall bs t x n1 n2, get (write (write bs t x n1) t x n2) t x = Some n2.
+Proof with auto.
+  intros.
+  unfold write, get.
+  repeat rewrite -> eq_tid.
+  induction (bs t) as [ | hd tl];
+    simpl.
+  Case "bs t = nil".
+    repeat rewrite -> eq_var...
+  Case "bs t = hd :: tl".
+    rewrite -> IHtl.
+    destruct hd...
+Qed.
 (* ---------------- end of Write Buffer ---------------- *)
 
 
@@ -471,6 +518,12 @@ Proof with eauto.
     destruct st as [bs mem ls].
     destruct (get bs t v) eqn:Hbs...
 Qed.
+
+(* TODO: Do I need to prove any corollary as that in Smallstep.v?
+May be used in proof of deterministic.
+Corollary nf_same_as_value : forall t,
+  normal_form step t <-> value t.
+*)
 (* ---------------- end of Arithmatic Expressions ---------------- *)
 
 
@@ -583,6 +636,12 @@ Proof with eauto.
     SCase "a1 ==A> a1'".
       inv H...
 Qed.
+
+(* TODO: Do I need to prove any corollary as that in Smallstep.v?
+May be used in proof of deterministic.
+Corollary nf_same_as_value : forall t,
+  normal_form step t <-> value t.
+*)
 (* ---------------- end of Boolean Expressions ---------------- *)
 
 

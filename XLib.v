@@ -81,6 +81,8 @@ Axiom functional_extensionality :
   forall {X Y: Type} {f g : X -> Y},
     (forall (x: X), f x = g x) -> f = g.
 
+Hint Resolve functional_extensionality.
+
 
 (* ---------------------------------------------------------------- *)
 (* For arithmatic & boolean operations *)
