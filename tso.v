@@ -18,21 +18,22 @@ Updated: 04/09/2014
 
 
 Structure:
-1. Variable
-2. Main memory
-3. Arithmatic / Boolean Expressions & Commands
-4. Thread ID
-5. LockID and Locks
-6. Write Buffers & Threads
-7. State
-8. Evaluation & Semantics
-9. TODO..
+* Variable
+* Main memory
+* Thread ID
+* LockID and Locks
+* Write Buffers
+* State
+* Arithmatic / Boolean Expressions & Commands
+* Evaluation & Semantics
+* TODO..
 *)
 
 Require Export XLib.
 
 
-(* ---------------- 1. Var ---------------- *)
+(* ---------------- Var ---------------- *)
+(* The variables are all "global" *)
 Inductive var : Type :=
 | Var : nat -> var.
 
@@ -84,10 +85,10 @@ Definition Z : var := Var 2.
 Hint Unfold X.
 Hint Unfold Y.
 Hint Unfold Z.
-(* ---------------- end of 1. Var ---------------- *)
+(* ---------------- end of Var ---------------- *)
 
 
-(* ---------------- 2. Main Memory ---------------- *)
+(* ---------------- Main Memory ---------------- *)
 Definition memory : Type := var -> nat.
 
 Definition empty_memory : memory := fun _ => 0.
@@ -156,72 +157,10 @@ Proof with auto.
 Qed.
 
 Hint Resolve update_permute.
-(* ---------------- end of 2. Main Memory ---------------- *)
+(* ---------------- end of Main Memory ---------------- *)
 
 
-(* ---------------- 3. A/B Expressions & Command ---------------- *)
-Inductive aexp : Type :=
-| ANum : nat -> aexp
-| APlus : aexp -> aexp -> aexp
-| AMinus : aexp -> aexp -> aexp
-| AMult : aexp -> aexp -> aexp
-| AVar : var -> aexp.
-
-Hint Constructors aexp.
-
-Tactic Notation "aexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "ANum" | Case_aux c "APlus"
-  | Case_aux c "AMinus" | Case_aux c "AMult"
-  | Case_aux c "AVar" ].
-
-
-Inductive bexp : Type :=
-| BTrue : bexp
-| BFalse : bexp
-| BNot : bexp -> bexp
-| BAnd : bexp -> bexp -> bexp
-| BOr : bexp -> bexp -> bexp
-| BEq : aexp -> aexp -> bexp
-| BLe : aexp -> aexp -> bexp.
-
-Hint Constructors bexp.
-
-Tactic Notation "bexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "BTrue" | Case_aux c "BFalse" | Case_aux c "BNot"
-  | Case_aux c "BAnd" | Case_aux c "BOr" | Case_aux c "BEq"
-  | Case_aux c "BLe" ].
-
-
-Inductive cmd : Type :=
-| CSkip : cmd
-| CAss : var -> aexp -> cmd
-| CSeq : cmd -> cmd -> cmd
-| CIf : bexp -> cmd -> cmd -> cmd
-| CWhile : bexp -> cmd -> cmd.
-
-Hint Constructors cmd.
-
-Tactic Notation "cmd_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "SKIP" | Case_aux c "::=" | Case_aux c ";;"
-  | Case_aux c "IFB" | Case_aux c "WHILE" ].
-
-Notation "'SKIP'" :=
-  CSkip.
-Notation "x '::=' a" :=
-  (CAss x a) (at level 60).
-Notation "c1 ;; c2" :=
-  (CSeq c1 c2) (at level 80, right associativity).
-Notation "'WHILE' b 'DO' c 'END'" :=
-  (CWhile b c) (at level 80, right associativity).
-Notation "'IFB' b 'THEN' c1 'ELSE' c2 'FI'" :=
-  (CIf b c1 c2) (at level 80, right associativity).
-(* ---------------- end of 3. A/B Expressions & Command ---------------- *)
-
-
-(* ---------------- 4. Thread ID ---------------- *)
+(* ---------------- Thread ID ---------------- *)
 Inductive tid : Type :=
 | TID : nat -> tid.
 
@@ -266,17 +205,18 @@ Qed.
 
 Hint Resolve neq_tid.
 
-Definition T0 : tid := TID 0.
+(* Default TID is zero, only used when haven't specified the TID *)
+Definition TID_DEF : tid := TID 0.
 Definition T1 : tid := TID 1.
 Definition T2 : tid := TID 2.
 
-Hint Unfold T0.
+Hint Unfold TID_DEF.
 Hint Unfold T1.
 Hint Unfold T2.
-(* ---------------- end of 4. Thread ID ---------------- *)
+(* ---------------- end of Thread ID ---------------- *)
 
 
-(* ---------------- 5. Lock ---------------- *)
+(* ---------------- Lock ---------------- *)
 Inductive lid : Type :=
 | LockID : nat -> lid.
 
@@ -334,8 +274,6 @@ Definition lock_status := lid -> option tid.
 Definition empty_locks : lock_status :=
   fun _ => None.
 
-Hint Unfold empty_locks.
-
 (* Checking of validity is left to semantics, not done here *)
 Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   fun l' => if eq_lid_dec l l' then Some t else st l'.
@@ -347,41 +285,172 @@ Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   fun l' => if eq_lid_dec l l' then None else st l'.
 
 Hint Unfold unlock.
-(* ---------------- end of 5. Lock ---------------- *)
+(* ---------------- end of Lock ---------------- *)
 
 
-(* ---------------- 6. Write Buffer & Threads ---------------- *)
+(* ---------------- Write Buffer ---------------- *)
 (* In the buffer: [old ... new], new writes are appended to the right *)
 Definition buffer : Type := list (var * nat).
+Definition buffer_status : Type := tid -> buffer.
 
-(* Add a new write to the end of buffer *)
-Fixpoint write (b : buffer) (x : var) (n : nat) : buffer :=
+Definition empty_buffers : buffer_status :=
+  fun _ => nil.
+
+(* Used in write() *)
+Fixpoint _write (b : buffer) (x : var) (n : nat) : buffer :=
   match b with
     | nil => [(x, n)]
-    | hd :: tl => hd :: write tl x n
+    | h :: t => h :: _write t x n
   end.
 
+(* Add a new write to the end of buffer *)
+Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
+  fun t' => if eq_tid_dec t t'
+            then _write (bs t) x n
+            else bs t'.
+
 (* get the oldest write in the buffer *)
-Definition lastone (b : buffer) : option (var * nat) :=
-  hd b.
+Definition oldest (bs : buffer_status) (t : tid) : option (var * nat) :=
+  hd (bs t).
 
 (* remove the oldest write in the buffer *)
-Fixpoint flush (b : buffer) : buffer :=
-  tl b.
+Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
+  fun t' => if eq_tid_dec t t'
+            then tl (bs t)
+            else bs t'.
 
 (* the helper function for get *)
 Fixpoint _get (b : buffer) (x : var) (result : option nat) : option nat :=
   match b with
     | nil => result
-    | (k, v) :: tl => if eq_var_dec x k
-                      then _get tl x (Some v)
-                      else _get tl x result
+    | (k, v) :: t => if eq_var_dec x k
+                     then _get t x (Some v)
+                     else _get t x result
   end.
 
 (* get the latest value of some variable in the buffer, if any *)
-Fixpoint get (b : buffer) (x : var) : option nat :=
-  _get b x None.
+Definition get (bs : buffer_status) (t : tid) (x : var) : option nat :=
+  _get (bs t) x None.
+(* ---------------- end of Write Buffer ---------------- *)
 
+
+(* ---------------- State ---------------- *)
+(* State consists of necessary information for a tid*cmd to execute:
+   * buffer status
+   * memory
+   * lock status
+*)
+Record state := ST {
+  st_bs : buffer_status;
+  st_mem : memory;
+  st_ls : lock_status
+}.
+
+Hint Constructors state.
+
+Definition empty_state := ST empty_buffers empty_memory empty_locks.
+(* ---------------- end of State ---------------- *)
+
+
+(* ---------------- A/B Expressions & Fence & Command ---------------- *)
+Inductive aexp : Type :=
+| ANum : nat -> aexp
+| APlus : aexp -> aexp -> aexp
+| AMinus : aexp -> aexp -> aexp
+| AMult : aexp -> aexp -> aexp
+| AVar : var -> aexp
+.
+
+Hint Constructors aexp.
+
+Tactic Notation "aexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "ANum" | Case_aux c "APlus"
+  | Case_aux c "AMinus" | Case_aux c "AMult"
+  | Case_aux c "AVar" ].
+
+
+Inductive bexp : Type :=
+| BTrue : bexp
+| BFalse : bexp
+| BNot : bexp -> bexp
+| BAnd : bexp -> bexp -> bexp
+| BOr : bexp -> bexp -> bexp
+| BEq : aexp -> aexp -> bexp
+| BLe : aexp -> aexp -> bexp
+.
+
+Hint Constructors bexp.
+
+Tactic Notation "bexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "BTrue" | Case_aux c "BFalse" | Case_aux c "BNot"
+  | Case_aux c "BAnd"
+  | Case_aux c "BOr"
+  | Case_aux c "BEq" | Case_aux c "BLe" ].
+
+
+Inductive fence : Type :=
+| MFENCE : fence
+.
+
+Hint Constructors fence.
+
+Tactic Notation "fence_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "MFENCE" ].
+
+
+Inductive cmd : Type :=
+| CSkip : cmd
+| CAss : var -> aexp -> cmd
+| CSeq : cmd -> cmd -> cmd
+| CIf : bexp -> cmd -> cmd -> cmd
+| CWhile : bexp -> cmd -> cmd
+(*
+TODO: I don't know how to specify the thread ID of a cmd, so I
+"hardcode" it like this.
+*)
+| CPar : tid -> cmd -> tid -> cmd -> cmd
+| CBar : fence -> cmd (* Barrier *)
+| CLock : lid -> cmd
+| CUnlock : lid -> cmd
+.
+
+Hint Constructors cmd.
+
+Tactic Notation "cmd_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "SKIP" | Case_aux c "::=" | Case_aux c ";;"
+  | Case_aux c "IFB" | Case_aux c "WHILE"
+  | Case_aux c "PAR" | Case_aux c "BAR"
+  | Case_aux c "LOCK" | Case_aux c "UNLOCK"
+  ].
+
+Notation "'SKIP'" :=
+  CSkip.
+Notation "x '::=' a" :=
+  (CAss x a) (at level 60).
+Notation "c1 ;; c2" :=
+  (CSeq c1 c2) (at level 80, right associativity).
+Notation "'IFB' b 'THEN' c1 'ELSE' c2 'FI'" :=
+  (CIf b c1 c2) (at level 80, right associativity).
+Notation "'WHILE' b 'DO' c 'END'" :=
+  (CWhile b c) (at level 80, right associativity).
+Notation "'PAR' t1 '@' c1 'WITH' t2 '@' c2 'END'" :=
+  (CPar t1 c1 t2 c2) (at level 80, right associativity).
+Notation "'BAR' f" :=
+  (CBar f) (at level 80).
+Notation "'LOCK' l" :=
+  (CLock l) (at level 80).
+Notation "'UNLOCK' l" :=
+  (CUnlock l) (at level 80).
+(* ---------------- end of A/B Expressions & Command ---------------- *)
+
+
+(* TODO Here is to define the term of "Threads", but I didn't find it
+useful now.. My current version can only support 2 threads. This will
+be useful when I extend to variable threads.
 
 Definition threads := tid -> (buffer * cmd).
 
@@ -389,79 +458,74 @@ Definition empty_threads : threads :=
   fun _ => ([], SKIP).
 
 Hint Unfold empty_threads.
-(* ---------------- end of 6. Write Buffer & Threads ---------------- *)
+*)
 
 
-(* ---------------- 7. State ---------------- *)
-(* state consists of 3 parts: threads (i.e. buffer + cmd) * locks * memory *)
-Record state := ST {
-  st_ts : threads;
-  st_ls : lock_status;
-  st_mem : memory
-}.
-
-Definition empty_state := ST empty_threads empty_locks empty_memory.
-(* ---------------- end of 7. State ---------------- *)
-
-
-(* ---------------- 8. Evaluation & Semantics ---------------- *)
+(* ---------------- Evaluation & Semantics ---------------- *)
 (* Only memory & buffer information is needed *)
-Fixpoint aeval (mem : memory) (buf : buffer) (a : aexp) : nat :=
+Fixpoint aeval (st : state) (t : tid) (a : aexp) : nat :=
   match a with
     | ANum n => n
-    | APlus a1 a2 => (aeval mem buf a1) + (aeval mem buf a2)
-    | AMinus a1 a2 => (aeval mem buf a1) - (aeval mem buf a2)
-    | AMult a1 a2 => (aeval mem buf a1) * (aeval mem buf a2)
-    | AVar x => match get buf x with
-                  | None => mem x
-                  | Some n => n
-                end
+    | APlus a1 a2 => (aeval st t a1) + (aeval st t a2)
+    | AMinus a1 a2 => (aeval st t a1) - (aeval st t a2)
+    | AMult a1 a2 => (aeval st t a1) * (aeval st t a2)
+    | AVar x =>
+      (* Search in the write buffer first, if none, go to memory *)
+      match st with
+        | ST bs mem _ => match get bs t x with
+                           | None => mem x
+                           | Some n => n
+                         end
+      end
   end.
 
 (* Only memory & buffer information is needed *)
-Fixpoint beval (mem : memory) (buf : buffer) (b : bexp) : bool :=
+Fixpoint beval (st : state) (t : tid) (b : bexp) : bool :=
   match b with
     | BTrue => true
     | BFalse => false
-    | BNot b' => negb (beval mem buf b')
-    | BAnd b1 b2 => andb (beval mem buf b1) (beval mem buf b2)
-    | BOr b1 b2 => orb (beval mem buf b1) (beval mem buf b2)
-    | BEq a1 a2 => beq_nat (aeval mem buf a1) (aeval mem buf a2)
-    | BLe a1 a2 => ble_nat (aeval mem buf a1) (aeval mem buf a2)
+    | BNot b' => negb (beval st t b')
+    | BAnd b1 b2 => andb (beval st t b1) (beval st t b2)
+    | BOr b1 b2 => orb (beval st t b1) (beval st t b2)
+    | BEq a1 a2 => beq_nat (aeval st t a1) (aeval st t a2)
+    | BLe a1 a2 => ble_nat (aeval st t a1) (aeval st t a2)
   end.
 
 
-(* TODO Resume here *)
-Reserved Notation "c1 '/' st '||' st'" (at level 40, st at level 39).
+(* TODO: Small step here?? *)
 
-Inductive ceval : cmd -> state -> state -> Prop :=
-  | CE_Skip : forall st,
-                SKIP / st || st
-  | CE_Ass  : forall st a1 n x,
-                aeval st a1 = n ->
-                (x ::= a1) / st || (update st x n)
-  | CE_Seq : forall c1 c2 st st' st'',
-               c1 / st  || st' ->
-               c2 / st' || st'' ->
-               (c1 ;; c2) / st || st''
-  | CE_IfTrue : forall st st' b c1 (c2 : cmd),
-                  beval st b = true ->
-                  c1 / st || st' ->
+Reserved Notation "t '@' c '/' st '||' st'" (at level 40, st at level 39).
+
+Inductive ceval : tid -> cmd -> state -> state -> Prop :=
+| C_Skip : forall t st,
+             t @ SKIP / st || st
+| C_Ass : forall t bs mem ls a n x,
+            aeval (ST bs mem ls) t a = n ->
+            t @ (x ::= a) / ST bs mem ls || ST (write bs t x n) mem ls
+
+
+  | C_Seq : forall c1 c2 st st' st'',
+              c1 / st  || st' ->
+              c2 / st' || st'' ->
+              (c1 ;; c2) / st || st''
+  | C_IfTrue : forall st st' b c1 (c2 : cmd),
+                 beval st b = true ->
+                 c1 / st || st' ->
+                 (IFB b THEN c1 ELSE c2 FI) / st || st'
+  | C_IfFalse : forall st st' b c1 c2,
+                  beval st b = false ->
+                  c2 / st || st' ->
                   (IFB b THEN c1 ELSE c2 FI) / st || st'
-  | CE_IfFalse : forall st st' b c1 c2,
+  | C_WhileEnd : forall b st c,
                    beval st b = false ->
-                   c2 / st || st' ->
-                   (IFB b THEN c1 ELSE c2 FI) / st || st'
-  | CE_WhileEnd : forall b st c,
-                    beval st b = false ->
-                    (WHILE b DO c END) / st || st
-  | CE_WhileLoop : forall st st' st'' b c,
-                     beval st b = true ->
-                     c / st || st' ->
-                     (WHILE b DO c END) / st' || st'' ->
-                     (WHILE b DO c END) / st || st''
+                   (WHILE b DO c END) / st || st
+  | C_WhileLoop : forall st st' st'' b c,
+                    beval st b = true ->
+                    c / st || st' ->
+                    (WHILE b DO c END) / st' || st'' ->
+                    (WHILE b DO c END) / st || st''
 
-where "c1 '/' st '||' st'" := (ceval c1 st st').
+where "t '@' c '/' st '||' st'" := (step t c st st').
 
 Hint Constructors ceval.
 
@@ -495,7 +559,7 @@ Proof with auto.
 Qed.
 
 Hint Resolve ceval_deterministic.
-(* ---------------- end of 8. Evaluation & Semantics ---------------- *)
+(* ---------------- end of Evaluation & Semantics ---------------- *)
 
 
 (* Equivalence chapter in SF may not be used later on.
