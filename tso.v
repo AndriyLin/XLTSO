@@ -24,8 +24,9 @@ Structure:
 * LockID and Locks
 * Write Buffers
 * State
-* Arithmatic / Boolean Expressions & Commands
-* Evaluation & Semantics
+* Arithmatic Expressions
+* Boolean Expressions
+* Commands
 * TODO..
 *)
 
@@ -353,7 +354,7 @@ Definition empty_state := ST empty_buffers empty_memory empty_locks.
 (* ---------------- end of State ---------------- *)
 
 
-(* ---------------- A/B Expressions & Fence & Command ---------------- *)
+(* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
 | APlus : aexp -> aexp -> aexp
@@ -371,12 +372,70 @@ Tactic Notation "aexp_cases" tactic(first) ident(c) :=
   | Case_aux c "AVar" ].
 
 
+Inductive avalue : aexp -> Prop :=
+| AV_Num : forall n, avalue (ANum n).
+
+Hint Constructors avalue.
+
+Reserved Notation "t '@' a1 '~' st '==A>' a2" (at level 50, left associativity).
+
+Inductive astep : tid -> aexp -> state -> aexp -> Prop :=
+| AS_Plus : forall t n1 n2 st,
+              t @ (APlus (ANum n1) (ANum n2)) ~ st ==A> ANum (n1 + n2)
+| AS_Plus1 : forall t a1 a1' a2 st,
+               t @ a1 ~ st ==A> a1' ->
+               t @ (APlus a1 a2) ~ st ==A> APlus a1' a2
+| AS_Plus2 : forall t a1 a2 a2' st,
+               avalue a1 ->
+               t @ a2 ~ st ==A> a2' ->
+               t @ (APlus a1 a2) ~ st ==A> APlus a1 a2'
+
+| AS_Minus : forall t n1 n2 st,
+               t @ (AMinus (ANum n1) (ANum n2)) ~ st ==A> ANum (n1 - n2)
+| AS_Minus1 : forall t a1 a1' a2 st,
+                t @ a1 ~ st ==A> a1' ->
+                t @ (AMinus a1 a2) ~ st ==A> AMinus a1' a2
+| AS_Minus2 : forall t a1 a2 a2' st,
+                avalue a1 ->
+                t @ a2 ~ st ==A> a2' ->
+                t @ (AMinus a1 a2) ~ st ==A> AMinus a1 a2'
+
+| AS_Mult : forall t n1 n2 st,
+              t @ (AMult (ANum n1) (ANum n2)) ~ st ==A> ANum (n1 * n2)
+| AS_Mult1 : forall t a1 a1' a2 st,
+               t @ a1 ~ st ==A> a1' ->
+               t @ (AMult a1 a2) ~ st ==A> AMult a1' a2
+| AS_Mult2 : forall t a1 a2 a2' st,
+               avalue a1 ->
+               t @ a2 ~ st ==A> a2' ->
+               t @ (AMult a1 a2) ~ st ==A> AMult a1 a2'
+
+| AS_VarBuf : forall t x bs mem ls n,
+                get bs t x = Some n ->
+                t @ (AVar x) ~ (ST bs mem ls) ==A> (ANum n)
+| AS_VarMem : forall t x bs mem ls n,
+                get bs t x = None ->
+                mem x = n ->
+                t @ (AVar x) ~ (ST bs mem ls) ==A> (ANum n)
+
+where "t '@' a1 '~' st '==A>' a2" := (astep t a1 st a2).
+
+Hint Constructors astep.
+
+Tactic Notation "astep_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "AS_Plus" | Case_aux c "AS_Plus1" | Case_aux c "AS_Plus2"
+  | Case_aux c "AS_Minus" | Case_aux c "AS_Minus1" | Case_aux c "AS_Minus2"
+  | Case_aux c "AS_Mult" | Case_aux c "AS_Mult1" | Case_aux c "AS_Mult2"
+  | Case_aux c "AS_VarBuf" | Case_aux c "AS_VarMem" ].
+(* ---------------- end of Arithmatic Expressions ---------------- *)
+
+
+(* ---------------- Boolean Expressions ---------------- *)
 Inductive bexp : Type :=
-| BTrue : bexp
-| BFalse : bexp
+| BBool : bool -> bexp
 | BNot : bexp -> bexp
 | BAnd : bexp -> bexp -> bexp
-| BOr : bexp -> bexp -> bexp
 | BEq : aexp -> aexp -> bexp
 | BLe : aexp -> aexp -> bexp
 .
@@ -385,12 +444,70 @@ Hint Constructors bexp.
 
 Tactic Notation "bexp_cases" tactic(first) ident(c) :=
   first;
-  [ Case_aux c "BTrue" | Case_aux c "BFalse" | Case_aux c "BNot"
-  | Case_aux c "BAnd"
-  | Case_aux c "BOr"
+  [ Case_aux c "BBool"
+  | Case_aux c "BNot" | Case_aux c "BAnd"
   | Case_aux c "BEq" | Case_aux c "BLe" ].
 
 
+Inductive bvalue : bexp -> Prop :=
+| BV_Bool : forall b : bool,
+              bvalue (BBool b).
+
+Hint Constructors bvalue.
+
+Reserved Notation "t '@' b1 '~' st '==B>' b2" (at level 50, left associativity).
+
+Inductive bstep : tid -> bexp -> state -> bexp -> Prop :=
+| BS_Not : forall t st b,
+             t @ (BNot (BBool b)) ~ st ==B> BBool (negb b)
+| BS_Not1 : forall t st be be',
+              t @ be ~ st ==B> be' ->
+              t @ (BNot be) ~ st ==B> (BNot be')
+
+| BS_And : forall t st b1 b2,
+             t @ (BAnd (BBool b1) (BBool b2)) ~ st ==B> BBool (andb b1 b2)
+| BS_And1 : forall t st be1 be1' be2,
+              t @ be1 ~ st ==B> be1' ->
+              t @ (BAnd be1 be2) ~ st ==B> BAnd be1' be2
+| BS_And2 : forall t st be1 be2 be2',
+              bvalue be1 ->
+              t @ be2 ~ st ==B> be2' ->
+              t @ (BAnd be1 be2) ~ st ==B> BAnd be1 be2'
+
+| BS_Eq : forall t st n1 n2,
+            t @ (BEq (ANum n1) (ANum n2)) ~ st ==B> BBool (beq_nat n1 n2)
+| BS_Eq1 : forall t st a1 a1' a2,
+             t @ a1 ~ st ==A> a1' ->
+             t @ (BEq a1 a2) ~ st ==B> BEq a1' a2
+| BS_Eq2 : forall t st a1 a2 a2',
+             avalue a1 ->
+             t @ a2 ~ st ==A> a2' ->
+             t @ (BEq a1 a2) ~ st ==B> BEq a1 a2'
+
+| BS_Le : forall t st n1 n2,
+            t @ (BLe (ANum n1) (ANum n2)) ~ st ==B> BBool (ble_nat n1 n2)
+| BS_Le1 : forall t st a1 a1' a2,
+             t @ a1 ~ st ==A> a1' ->
+             t @ (BLe a1 a2) ~ st ==B> BLe a1' a2
+| BS_Le2 : forall t st a1 a2 a2',
+             avalue a1 ->
+             t @ a2 ~ st ==A> a2' ->
+             t @ (BLe a1 a2) ~ st ==B> BLe a1 a2'
+
+where "t '@' b1 '~' st '==B>' b2" := (bstep t b1 st b2).
+
+Hint Constructors bstep.
+
+Tactic Notation "bstep_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "BS_Not" | Case_aux c "BS_Not1"
+  | Case_aux c "BS_And" | Case_aux c "BS_And1" | Case_aux c "BS_And2"
+  | Case_aux c "BS_Eq" | Case_aux c "BS_Eq1" | Case_aux c "BS_Eq2"
+  | Case_aux c "BS_Le" | Case_aux c "BS_Le1" | Case_aux c "BS_Le2" ].
+(* ---------------- end of Boolean Expressions ---------------- *)
+
+
+(* ---------------- Fence & Command ---------------- *)
 Inductive fence : Type :=
 | MFENCE : fence
 .
@@ -416,7 +533,7 @@ TODO: I don't know how to specify the thread ID of a cmd, so I
 | CBar : fence -> cmd (* Barrier *)
 | CLock : lid -> cmd
 | CUnlock : lid -> cmd
-(* CAtomic?? *)
+(* TODO: CAtomic?? *)
 .
 
 Hint Constructors cmd.
@@ -464,36 +581,6 @@ Hint Unfold empty_threads.
 
 
 (* ---------------- Evaluation & Semantics ---------------- *)
-(* Only memory & buffer information is needed *)
-Fixpoint aeval (st : state) (t : tid) (a : aexp) : nat :=
-  match a with
-    | ANum n => n
-    | APlus a1 a2 => (aeval st t a1) + (aeval st t a2)
-    | AMinus a1 a2 => (aeval st t a1) - (aeval st t a2)
-    | AMult a1 a2 => (aeval st t a1) * (aeval st t a2)
-    | AVar x =>
-      (* Search in the write buffer first, if none, go to memory *)
-      match st with
-        | ST bs mem _ => match get bs t x with
-                           | None => mem x
-                           | Some n => n
-                         end
-      end
-  end.
-
-(* Only memory & buffer information is needed *)
-Fixpoint beval (st : state) (t : tid) (b : bexp) : bool :=
-  match b with
-    | BTrue => true
-    | BFalse => false
-    | BNot b' => negb (beval st t b')
-    | BAnd b1 b2 => andb (beval st t b1) (beval st t b2)
-    | BOr b1 b2 => orb (beval st t b1) (beval st t b2)
-    | BEq a1 a2 => beq_nat (aeval st t a1) (aeval st t a2)
-    | BLe a1 a2 => ble_nat (aeval st t a1) (aeval st t a2)
-  end.
-
-
 (* TODO: Small step here?? *)
 
 Reserved Notation "t '@' c '/' st '||' st'" (at level 40, st at level 39).
@@ -741,5 +828,6 @@ TODOs:
 1. Add test cases (Example) to check the correctness of each definition above.
 2. Will Hoare Logic be used in the project? I am not sure.
 3. Do I need to extend the language to contain Lambda?
+4. Add BOr into bexp??
 *)
 
