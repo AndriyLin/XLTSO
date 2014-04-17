@@ -290,13 +290,13 @@ Proof with auto.
 Qed.
 
 (* Again, checking of validity is not done here, it's left to semantics *)
-Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
+Definition unlock (st : lock_status) (l : lid) : lock_status :=
   fun l' => if eq_lid_dec l l' then None else st l'.
 
 Hint Unfold unlock.
 
 Theorem test_unlock_correctness:
-  forall st t l, (unlock st t l) l = None.
+  forall st l, (unlock st l) l = None.
 Proof with auto.
   intros.
   unfold unlock...
@@ -397,7 +397,7 @@ Qed.
 (* ---------------- end of Write Buffer ---------------- *)
 
 
-(* ---------------- State ---------------- *)
+(* ---------------- State & Multi-Relation ---------------- *)
 (* State consists of necessary information for a tid*cmd to execute:
    * buffer status
    * memory
@@ -412,7 +412,49 @@ Record state := ST {
 Hint Constructors state.
 
 Definition empty_state := ST empty_buffers empty_memory empty_locks.
-(* ---------------- end of State ---------------- *)
+
+
+(* TODO: is the relation & normal form definition here necessary?? *)
+Definition relation (X:Type) := tid -> X -> X -> Prop.
+
+Definition deterministic {X: Type} (R: relation X) :=
+  forall t x y1 y2, R t x y1 -> R t x y2 -> y1 = y2.
+
+Hint Unfold deterministic.
+
+Inductive multi {X:Type} (R: relation X) : tid -> X -> X -> Prop :=
+| multi_refl  : forall t x,
+                  multi R t x x
+| multi_step : forall t x y z,
+                 R t x y ->
+                 multi R t y z ->
+                 multi R t x z.
+
+Hint Constructors multi.
+
+Tactic Notation "multi_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "multi_refl" | Case_aux c "multi_step" ].
+
+Theorem multi_R : forall (X:Type) (R:relation X) (t : tid) (x y : X),
+                    R t x y -> multi R t x y.
+Proof. eauto. Qed.
+
+Hint Resolve multi_R.
+
+Theorem multi_trans :
+  forall (X:Type) (R: relation X) (t : tid) (x y z : X),
+      multi R t x y  ->
+      multi R t y z ->
+      multi R t x z.
+Proof.
+  intros X R t x y z Hxy Hyz.
+  multi_cases (induction Hxy) Case;
+    simpl; eauto.
+Qed.
+
+Hint Resolve multi_trans.
+(* ---------------- end of State & Multi-Relation ---------------- *)
 
 
 (* ---------------- Arithmatic Expressions ---------------- *)
@@ -438,7 +480,7 @@ Inductive avalue : aexp -> Prop :=
 
 Hint Constructors avalue.
 
-Reserved Notation "t '@' a1 '~' st '==A>' a2" (at level 50, left associativity).
+Reserved Notation "t '@' a1 '~' st '==A>' a2" (at level 50).
 
 Inductive astep : tid -> aexp -> state -> aexp -> Prop :=
 | AS_Plus : forall t n1 n2 st,
@@ -551,7 +593,7 @@ Inductive bvalue : bexp -> Prop :=
 
 Hint Constructors bvalue.
 
-Reserved Notation "t '@' b1 '~' st '==B>' b2" (at level 50, left associativity).
+Reserved Notation "t '@' b1 '~' st '==B>' b2" (at level 50).
 
 Inductive bstep : tid -> bexp -> state -> bexp -> Prop :=
 | BS_Not : forall t st b,
@@ -702,57 +744,77 @@ Notation "'LOCK' l" :=
   (CLock l) (at level 80).
 Notation "'UNLOCK' l" :=
   (CUnlock l) (at level 80).
-(* ---------------- end of A/B Expressions & Command ---------------- *)
 
 
-(* TODO Here is to define the term of "Threads", but I didn't find it
-useful now.. My current version can only support 2 threads. This will
-be useful when I extend to variable threads.
+(* Due to the definition of relation, normal_form is only for cstep. *)
+Definition normal_form {X:Type} (R : relation X) (x : X) : Prop :=
+  forall t, ~ exists x', R t x x'.
 
-Definition threads := tid -> (buffer * cmd).
 
-Definition empty_threads : threads :=
-  fun _ => ([], SKIP).
+(* TODO: a Triple for (tid * cmd * state)?? *)
 
-Hint Unfold empty_threads.
+Reserved Notation "t1 '@' c1 '~' st1 '==>' t2 '@' c2 '~' st2" (at level 50).
+
+Inductive cstep : tid -> (cmd * state) -> tid -> (cmd * state) -> Prop :=
+| CS_Ass : forall t x n bs mem ls,
+             t @ (x ::= (ANum n)) ~ (ST bs mem ls) ==> t @ SKIP ~ (ST (write bs t x n) mem ls)
+| CS_AssStep : forall (t : tid) (x : var) (a a' : aexp) (st : state),
+                 t @ a ~ st ==A> a' ->
+                 t @ (x ::= a) ~ st ==> t @ (x ::= a') ~ st
+
+| CS_Seq : forall t c2 st,
+             t @ (SKIP ;; c2) ~ st ==> t @ c2 ~ st
+| CS_SeqStep : forall t c1 c1' c2 st st',
+                 t @ c1 ~ st ==> c1' ~ st' ->
+                 t @ (c1 ;; c2) ~ st ==> (c1' ;; c2) ~ st'
+
+| CS_IfTrue : forall t c1 c2 st,
+                t @ (IFB (BBool true) THEN c1 ELSE c2 FI) ~ st ==> c1 ~ st
+| CS_IfFalse : forall t c1 c2 st,
+                 t @ (IFB (BBool false) THEN c1 ELSE c2 FI) ~ st ==> c2 ~ st
+| CS_IfStep : forall t c1 c2 be be' st,
+                t @ be ~ st ==B> be' ->
+                t @ (IFB be THEN c1 ELSE c2 FI) ~ st ==> (IFB be' THEN c1 ELSE c2 FI) ~ st
+
+| CS_While : forall t b c st,
+               t @ (WHILE b DO c END) ~ st ==>
+                 (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) ~ st
+
+| CS_BarGo : forall t bs mem ls,
+               oldest bs t = None ->
+               t @ (BAR MFENCE) ~ (ST bs mem ls) ==> SKIP ~ (ST bs mem ls)
+| CS_BarFlush : forall t bs mem ls x n,
+                  oldest bs t = Some (x, n) ->
+                  t @ (BAR MFENCE) ~ (ST bs mem ls) ==>
+                    (BAR MFENCE) ~ (ST (flush bs t) (update mem x n) ls)
+
+| CS_Lock : forall t bs mem ls id,
+              ls id = None ->
+              t @ (CLock id) ~ (ST bs mem ls) ==> SKIP ~ (ST bs mem (lock ls t id))
+| CS_Unlock : forall t bs mem ls id,
+                ls id = Some t ->
+                t @ (CUnlock id) ~ (ST bs mem ls) ==> SKIP ~ (ST bs mem (unlock ls id))
+
+(* TODO: Finish the semantics for PAR
+| CS_Par1 : forall t t1 t2 c1 c2 st,
+              t @ (PAR t1 @ c1 WITH t2 @ c2 END) ~ st ==> SKIP ~ st
 *)
 
-
-(* ---------------- Evaluation & Semantics ---------------- *)
-(* TODO: Small step here?? *)
-
-Reserved Notation "t '@' c '/' st '||' st'" (at level 40, st at level 39).
-
-Inductive ceval : tid -> cmd -> state -> state -> Prop :=
-| C_Skip : forall t st,
-             t @ SKIP / st || st
-| C_Ass : forall t bs mem ls a n x,
-            aeval (ST bs mem ls) t a = n ->
-            t @ (x ::= a) / ST bs mem ls || ST (write bs t x n) mem ls
+where "t1 '@' c1 '~' st1 '==>' t2 '@' c2 '~' st2" := (cstep t1 (c1, st1) t2 (c2, st2)).
 
 
-  | C_Seq : forall c1 c2 st st' st'',
-              c1 / st  || st' ->
-              c2 / st' || st'' ->
-              (c1 ;; c2) / st || st''
-  | C_IfTrue : forall st st' b c1 (c2 : cmd),
-                 beval st b = true ->
-                 c1 / st || st' ->
-                 (IFB b THEN c1 ELSE c2 FI) / st || st'
-  | C_IfFalse : forall st st' b c1 c2,
-                  beval st b = false ->
-                  c2 / st || st' ->
-                  (IFB b THEN c1 ELSE c2 FI) / st || st'
-  | C_WhileEnd : forall b st c,
-                   beval st b = false ->
-                   (WHILE b DO c END) / st || st
-  | C_WhileLoop : forall st st' st'' b c,
-                    beval st b = true ->
-                    c / st || st' ->
-                    (WHILE b DO c END) / st' || st'' ->
-                    (WHILE b DO c END) / st || st''
+Notation "'PAR' t1 '@' c1 'WITH' t2 '@' c2 'END'" :=
 
-where "t '@' c '/' st '||' st'" := (step t c st st').
+| CS_Par1 : forall st c1 c1' c2 st',
+              c1 / st ==> c1' / st' -> 
+              (PAR c1 WITH c2 END) / st ==> (PAR c1' WITH c2 END) / st'
+| CS_Par2 : forall st c1 c2 c2' st',
+              c2 / st ==> c2' / st' ->
+              (PAR c1 WITH c2 END) / st ==> (PAR c1 WITH c2' END) / st'
+| CS_ParDone : forall st,
+                 (PAR SKIP WITH SKIP END) / st ==> SKIP / st
+
+
 
 Hint Constructors ceval.
 
@@ -786,7 +848,26 @@ Proof with auto.
 Qed.
 
 Hint Resolve ceval_deterministic.
-(* ---------------- end of Evaluation & Semantics ---------------- *)
+
+
+(* TODO: also prove the "strong_progress" version for cstep, regarding normal_form *)
+(* ---------------- end of Fence & Command ---------------- *)
+
+
+
+
+(* TODO Here is to define the term of "Threads", but I didn't find it
+useful now.. My current version can only support 2 threads. This will
+be useful when I extend to variable threads.
+
+Definition threads := tid -> (buffer * cmd).
+
+Definition empty_threads : threads :=
+  fun _ => ([], SKIP).
+
+Hint Unfold empty_threads.
+*)
+
 
 
 (* Equivalence chapter in SF may not be used later on.
