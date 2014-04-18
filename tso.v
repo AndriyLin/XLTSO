@@ -30,6 +30,7 @@ Structure:
 * TODO..
 *)
 
+Require Import Coq.Lists.ListSet.
 Require Export XLib.
 
 
@@ -207,6 +208,7 @@ Qed.
 Hint Resolve neq_tid.
 
 (* Default TID is zero, only used when haven't specified the TID *)
+(* TODO: may I delete the following? Because the tid number needn't to be exposed.
 Definition TID_DEF : tid := TID 0.
 Definition T1 : tid := TID 1.
 Definition T2 : tid := TID 2.
@@ -214,13 +216,25 @@ Definition T2 : tid := TID 2.
 Hint Unfold TID_DEF.
 Hint Unfold T1.
 Hint Unfold T2.
+*)
+
+(* The following is to define a set that contains tids of all current threads *)
+Definition empty_tids := empty_set tid.
+
+Definition in_tids : tid -> set tid -> bool :=
+  set_mem eq_tid_dec.
+
+Definition add_tid : tid -> set tid -> set tid :=
+  set_add eq_tid_dec.
+
+Definition remove_tid : tid -> set tid -> set tid :=
+  set_remove eq_tid_dec.
 (* ---------------- end of Thread ID ---------------- *)
 
 
 (* ---------------- Lock ---------------- *)
 Inductive lid : Type :=
 | LockID : nat -> lid.
-(* TODO: do I need to change lid to "var -> lid"?? *)
 
 Hint Constructors lid.
 
@@ -273,6 +287,7 @@ Hint Unfold L2.
 
 
 Definition lock_status := lid -> option tid.
+
 Definition empty_locks : lock_status :=
   fun _ => None.
 
@@ -282,6 +297,15 @@ Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 
 Hint Unfold lock.
 
+(* Again, checking of validity is not done here, it's left to semantics *)
+Definition unlock (st : lock_status) (l : lid) : lock_status :=
+  fun l' => if eq_lid_dec l l' then None else st l'.
+
+Hint Unfold unlock.
+
+
+Module test_locks.
+
 Theorem test_lock_correctness:
   forall st t l, (lock st t l) l = Some t.
 Proof with auto.
@@ -289,18 +313,14 @@ Proof with auto.
   unfold lock...
 Qed.
 
-(* Again, checking of validity is not done here, it's left to semantics *)
-Definition unlock (st : lock_status) (l : lid) : lock_status :=
-  fun l' => if eq_lid_dec l l' then None else st l'.
-
-Hint Unfold unlock.
-
 Theorem test_unlock_correctness:
   forall st l, (unlock st l) l = None.
 Proof with auto.
   intros.
   unfold unlock...
 Qed.
+
+End test_locks.
 (* ---------------- end of Lock ---------------- *)
 
 
@@ -753,7 +773,12 @@ Definition normal_form {X:Type} (R : relation X) (x : X) : Prop :=
 
 (* TODO: a Triple for (tid * cmd * state)?? *)
 
+(* Note: the "value" for cmd is SKIP with empty write buffer *)
+
+
 Reserved Notation "t1 '@' c1 '~' st1 '==>' t2 '@' c2 '~' st2" (at level 50).
+
+(* TODO: Make t : tid a pram in cstep *)
 
 Inductive cstep : tid -> (cmd * state) -> tid -> (cmd * state) -> Prop :=
 | CS_Ass : forall t x n bs mem ls,
@@ -780,13 +805,12 @@ Inductive cstep : tid -> (cmd * state) -> tid -> (cmd * state) -> Prop :=
                t @ (WHILE b DO c END) ~ st ==>
                  (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) ~ st
 
-| CS_BarGo : forall t bs mem ls,
-               oldest bs t = None ->
-               t @ (BAR MFENCE) ~ (ST bs mem ls) ==> SKIP ~ (ST bs mem ls)
-| CS_BarFlush : forall t bs mem ls x n,
-                  oldest bs t = Some (x, n) ->
-                  t @ (BAR MFENCE) ~ (ST bs mem ls) ==>
-                    (BAR MFENCE) ~ (ST (flush bs t) (update mem x n) ls)
+| CS_Bar : forall t bs mem ls,
+             oldest bs t = None ->
+             t @ (BAR MFENCE) ~ (ST bs mem ls) ==> SKIP ~ (ST bs mem ls)
+| CS_Flush : forall t bs mem ls x n c,
+               oldest bs t = Some (x, n) ->
+               t @ c ~ (ST bs mem ls) ==> c ~ (ST (flush bs t) (update mem x n) ls)
 
 | CS_Lock : forall t bs mem ls id,
               ls id = None ->
