@@ -810,89 +810,90 @@ Hint Constructors state.
 
 
 (* Although using word "value", it actually means unable to move forward *)
-Inductive cvalue : tid -> state -> Prop :=
-| CV_End : forall t mem lks,
-             cvalue t (ST SKIP nil mem lks)
-| CV_Stuck : forall t t' l buf mem lks,
-               lks l = Some t' ->
-               t <> t' ->
-               cvalue t (ST (LOCK l) buf mem lks)
+Inductive stvalue : tid -> state -> Prop :=
+| STV_End : forall t mem lks,
+              stvalue t (ST SKIP nil mem lks)
+| STV_Stuck : forall t t' l buf mem lks,
+                lks l = Some t' ->
+                t <> t' ->
+                stvalue t (ST (LOCK l) buf mem lks)
 .
 
-Hint Constructors cvalue.
+Hint Constructors stvalue.
 
 Reserved Notation "t '@' st1 '==>' st2" (at level 80).
 
-Inductive cstep : tid -> state -> state -> Prop :=
-| CS_Ass : forall t x n buf mem lks,
+Inductive ststep : tid -> state -> state -> Prop :=
+| ST_Ass : forall t x n buf mem lks,
              t @ (ST (x ::= ANum n) buf mem lks) ==>
                (ST SKIP (write buf x n) mem lks)
-| CS_AssStep : forall t x a a' buf mem lks,
+| ST_AssStep : forall t x a a' buf mem lks,
                  a /- buf ~ mem ==A> a' ->
                  t @ (ST (x ::= a) buf mem lks) ==> (ST (x ::= a') buf mem lks)
 
-| CS_Seq : forall t c2 buf mem lks,
+| ST_Seq : forall t c2 buf mem lks,
              t @ (ST (SKIP ;; c2) buf mem lks) ==> (ST c2 buf mem lks)
-| CS_SeqStep : forall t c1 c1' c2 buf mem lks buf' mem' lks',
+| ST_SeqStep : forall t c1 c1' c2 buf mem lks buf' mem' lks',
                  t @ (ST c1 buf mem lks) ==> (ST c1' buf' mem' lks') ->
                  t @ (ST (c1 ;; c2) buf mem lks) ==> (ST (c1' ;; c2) buf' mem' lks')
 
-| CS_IfTrue : forall t c1 c2 buf mem lks,
+| ST_IfTrue : forall t c1 c2 buf mem lks,
                 t @ (ST (IFB (BBool true) THEN c1 ELSE c2 FI) buf mem lks) ==>
                   (ST c1 buf mem lks)
-| CS_IfFalse : forall t c1 c2 buf mem lks,
+| ST_IfFalse : forall t c1 c2 buf mem lks,
                  t @ (ST (IFB (BBool false) THEN c1 ELSE c2 FI) buf mem lks) ==>
                    (ST c2 buf mem lks)
-| CS_IfStep : forall t c1 c2 be be' buf mem lks,
+| ST_IfStep : forall t c1 c2 be be' buf mem lks,
                 be /- buf ~ mem ==B> be' ->
                 t @ (ST (IFB be THEN c1 ELSE c2 FI) buf mem lks) ==>
                   (ST (IFB be' THEN c1 ELSE c2 FI) buf mem lks)
 
-| CS_While : forall t b c buf mem lks,
+| ST_While : forall t b c buf mem lks,
                t @ (ST (WHILE b DO c END) buf mem lks) ==>
                  (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks)
 
-| CS_Bar : forall t buf mem lks,
+| ST_Bar : forall t buf mem lks,
              oldest buf = None ->
              t @ (ST (BAR MFENCE) buf mem lks) ==> (ST SKIP buf mem lks)
-| CS_Flush : forall t buf mem lks x n c,
+(* TODO: One idea is to let Flush be a op in configuration rather than state, so as to make ststep deterministic? *)
+| ST_Flush : forall t buf mem lks x n c,
                (* Here either blocked or not it can flush anyway *)
                oldest buf = Some (x, n) ->
                t @ (ST c buf mem lks) ==> (ST c (flush buf) (update mem x n) lks)
 
-| CS_LockDone : forall t buf mem lks lk,
+| ST_LockDone : forall t buf mem lks lk,
                   lks lk = None \/ lks lk = Some t ->
                   t @ (ST (LOCK lk) buf mem lks) ==>
                     (ST SKIP buf mem (lock lks t lk))
-| CS_LockStuck : forall t t' buf mem lks lk,
+| ST_LockStuck : forall t t' buf mem lks lk,
                    lks lk = Some t' ->
                    t <> t' ->
                    t @ (ST (LOCK lk) buf mem lks) ==> (ST (LOCK lk) buf mem lks)
-| CS_Unlock : forall t buf mem lks lk,
+| ST_Unlock : forall t buf mem lks lk,
                 (* For simplicity, I don't check the validity of this action, it won't
                    change the state anyway if t doesn't hold the lock *)
                 (* lks lk = Some t -> *)
                 t @ (ST (UNLOCK lk) buf mem lks) ==>
                   (ST SKIP buf mem (unlock lks t lk))
 
-where "t1 '@' st1 '==>' st2" := (cstep t1 st1 st2).
+where "t1 '@' st1 '==>' st2" := (ststep t1 st1 st2).
 
-Hint Constructors cstep.
+Hint Constructors ststep.
 
-Tactic Notation "cstep_cases" tactic(first) ident(c) :=
+Tactic Notation "ststep_cases" tactic(first) ident(c) :=
   first;
-  [ Case_aux c "CS_Ass" | Case_aux c "CS_AssStep"
-  | Case_aux c "CS_Seq" | Case_aux c "CS_SeqStep"
-  | Case_aux c "CS_IfTrue" | Case_aux c "CS_IfFalse"
-  | Case_aux c "CS_IfStep" | Case_aux c "CS_While"
-  | Case_aux c "CS_Bar" | Case_aux c "CS_Flush"
-  | Case_aux c "CS_LockDone" | Case_aux c "CS_LockStuck" | Case_aux c "CS_Unlock"
+  [ Case_aux c "ST_Ass" | Case_aux c "ST_AssStep"
+  | Case_aux c "ST_Seq" | Case_aux c "ST_SeqStep"
+  | Case_aux c "ST_IfTrue" | Case_aux c "ST_IfFalse"
+  | Case_aux c "ST_IfStep" | Case_aux c "ST_While"
+  | Case_aux c "ST_Bar" | Case_aux c "ST_Flush"
+  | Case_aux c "ST_LockDone" | Case_aux c "ST_LockStuck" | Case_aux c "ST_Unlock"
   ].
 
 
-Theorem strong_progress_c :
+Theorem strong_progress_st :
   forall c buf mem lks t,
-    cvalue t (ST c buf mem lks) \/ (exists st', t @ (ST c buf mem lks) ==> st').
+    stvalue t (ST c buf mem lks) \/ (exists st', t @ (ST c buf mem lks) ==> st').
 Proof with eauto.
   intros c.
   cmd_cases (induction c) Case;
@@ -902,7 +903,7 @@ Proof with eauto.
     right.
     destruct p.
     exists (ST SKIP buf (update mem v n) lks)...
-    apply CS_Flush...
+    apply ST_Flush...
   Case "::=".
     right; destruct (strong_progress_a a buf mem)...
     inv H...
@@ -920,7 +921,7 @@ Proof with eauto.
     destruct buf...
     destruct p.
     eexists (ST (BAR MFENCE) buf (update mem v n) lks).
-    apply CS_Flush...
+    apply ST_Flush...
   Case "LOCK".
     destruct (lks l) eqn:Hl...
     destruct (eq_tid_dec t t0); subst...
@@ -930,7 +931,7 @@ Qed.
 (* When a thread get stuck, it can resume when that lock is released *)
 Theorem thread_stuck_resume:
   forall t l buf mem lks lks',
-    cvalue t (ST (LOCK l) buf mem lks) ->
+    stvalue t (ST (LOCK l) buf mem lks) ->
     lks' l = None \/ lks' l = Some t ->
     exists st', t @ (ST (LOCK l) buf mem lks') ==> st'.
 Proof. eauto. Qed.
@@ -938,7 +939,7 @@ Proof. eauto. Qed.
 
 (* cstep is no longer deterministic, one state may execute one
 command, it may also flush one write to memory *)
-Theorem cstep_not_deterministic:
+Theorem ststep_not_deterministic:
   ~ (forall t st st1 st2,
        t @ st ==> st1 ->
        t @ st ==> st2 ->
@@ -954,7 +955,7 @@ Proof with auto.
     subst...
   assert (T0 @ st ==> st2).
     subst.
-    apply CS_Flush.
+    apply ST_Flush.
     simpl...
   assert (st1 = st2).
     eapply Hf.
@@ -967,8 +968,8 @@ Qed.
 (* ---------------- end of Command & State (uni) ---------------- *)
 
 
-(* TODO: resume from here *)
 (* ---------------- Threads & Configuration ---------------- *)
+(* Command and Write Buffer is thread private *)
 Definition threads := tid -> (cmd * buffer).
 
 Definition empty_threads : threads :=
@@ -976,16 +977,78 @@ Definition empty_threads : threads :=
 
 Hint Unfold empty_threads.
 
+Definition override (ts: threads) (t : tid) (c : cmd) (b : buffer) :=
+  fun t' => if eq_tid_dec t t'
+            then (c, b)
+            else ts t'.
+
+Hint Unfold override.
+
 
 (* configuration contains everything that may be modified *)
 Record configuration := CFG {
   cfg_tids : set tid;
-  cfg_tds : threads;
+  cfg_thds : threads;
   cfg_mem : memory;
   cfg_lks : lock_status
 }.
 
-(* ---------------- end of Thread & State (uni) & Configuration ---------------- *)
+Hint Constructors configuration.
+
+Definition empty_configuration :=
+  CFG empty_tids empty_threads empty_memory empty_locks.
+
+
+Inductive cfgvalue : configuration -> Prop :=
+(* All threads finish *)
+| CFGV_End : forall thds mem lks,
+               cfgvalue (CFG empty_tids thds mem lks)
+(* Deadlock *)
+(*| CFGV_Deadlock: TODO *)
+.
+
+Reserved Notation "cfg1 '-->' cfg2" (at level 60).
+
+Inductive cfgstep : configuration -> configuration -> Prop :=
+(* One thread ends its job *)
+| CFGS_Done : forall t tids thds mem lks,
+                in_tids t tids = true ->
+                thds t = (SKIP, nil) ->
+                (CFG tids thds mem lks) --> (CFG (remove_tid t tids) thds mem lks)
+
+(* One thread moves forward *)
+| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks',
+               in_tids t tids = true ->
+               thds t = (c, b) ->
+               t @ (ST c b mem lks) ==> (ST c' b' mem' lks') ->
+               (CFG tids thds mem lks) --> (CFG tids (override thds t c' b') mem' lks')
+
+where "cfg1 '-->' cfg2" := (cfgstep cfg1 cfg2).
+
+Hint Constructors cfgstep.
+
+Tactic Notation "cfgstep_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "CFG_Done" | Case_aux c "CFG_One" ].
+
+
+Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configuration :=
+  match lc with
+    | nil => accu
+    | h :: tlc =>
+      match accu with
+        | CFG tids thds mem lks =>
+          let t := TID n in
+          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks in
+          _init_cfg tlc (S n) accu'
+      end
+  end.
+
+Definition init_cfg (lc : list cmd) : configuration :=
+  _init_cfg lc 0 empty_configuration.
+
+(* All above are the definitions for the parallel language *)
+(* ---------------- end of Threads & Configuration ---------------- *)
 
 
 
