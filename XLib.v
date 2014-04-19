@@ -61,6 +61,9 @@ Tactic Notation "solve" "by" "inversion" :=
   solve by inversion 1.
 
 
+(* This additional tactic is just to inversion those that are apparently false *)
+Ltac invf H := inversion H; subst; clear H.
+
 Ltac inv H := inversion H; subst; clear H.
 Ltac rwinv H1 H2 := rewrite H1 in H2; inv H2.
 Ltac find_rwinv :=

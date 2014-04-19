@@ -207,16 +207,14 @@ Qed.
 
 Hint Resolve neq_tid.
 
-(* Default TID is zero, only used when haven't specified the TID *)
-(* TODO: may I delete the following? Because the tid number needn't to be exposed.
-Definition TID_DEF : tid := TID 0.
+Definition T0 : tid := TID 0.
 Definition T1 : tid := TID 1.
 Definition T2 : tid := TID 2.
 
-Hint Unfold TID_DEF.
+Hint Unfold T0.
 Hint Unfold T1.
 Hint Unfold T2.
-*)
+
 
 (* The following is to define a set that contains tids of all current threads *)
 Definition empty_tids := empty_set tid.
@@ -474,47 +472,47 @@ Inductive avalue : aexp -> Prop :=
 
 Hint Constructors avalue.
 
-Reserved Notation "a1 '|-' b '~' m '==A>' a2" (at level 80).
+Reserved Notation "a1 '/-' b '~' m '==A>' a2" (at level 80).
 
 Inductive astep : buffer -> memory -> aexp -> aexp -> Prop :=
 | AS_Plus : forall b m n1 n2,
-              (APlus (ANum n1) (ANum n2)) |- b ~ m ==A> ANum (n1 + n2)
+              (APlus (ANum n1) (ANum n2)) /- b ~ m ==A> ANum (n1 + n2)
 | AS_Plus1 : forall b m a1 a1' a2,
-               a1 |- b ~ m ==A> a1' ->
-               (APlus a1 a2) |- b ~ m ==A> (APlus a1' a2)
+               a1 /- b ~ m ==A> a1' ->
+               (APlus a1 a2) /- b ~ m ==A> (APlus a1' a2)
 | AS_Plus2 : forall b m a1 a2 a2',
                avalue a1 ->
-               a2 |- b ~ m ==A> a2' ->
-               (APlus a1 a2) |- b ~ m ==A> (APlus a1 a2')
+               a2 /- b ~ m ==A> a2' ->
+               (APlus a1 a2) /- b ~ m ==A> (APlus a1 a2')
 
 | AS_Minus : forall b m n1 n2,
-               AMinus (ANum n1) (ANum n2) |- b ~ m ==A> ANum (n1 - n2)
+               AMinus (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 - n2)
 | AS_Minus1 : forall b m a1 a1' a2,
-                a1 |- b ~ m ==A> a1' ->
-                (AMinus a1 a2) |- b ~ m ==A> (AMinus a1' a2)
+                a1 /- b ~ m ==A> a1' ->
+                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1' a2)
 | AS_Minus2 : forall b m a1 a2 a2',
                 avalue a1 ->
-                a2 |- b ~ m ==A> a2' ->
-                (AMinus a1 a2) |- b ~ m ==A> (AMinus a1 a2')
+                a2 /- b ~ m ==A> a2' ->
+                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1 a2')
 
 | AS_Mult : forall b m n1 n2,
-              AMult (ANum n1) (ANum n2) |- b ~ m ==A> ANum (n1 * n2)
+              AMult (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 * n2)
 | AS_Mult1 : forall b m a1 a1' a2,
-               a1 |- b ~ m ==A> a1' ->
-               (AMult a1 a2) |- b ~ m ==A> (AMult a1' a2)
+               a1 /- b ~ m ==A> a1' ->
+               (AMult a1 a2) /- b ~ m ==A> (AMult a1' a2)
 | AS_Mult2 : forall b m a1 a2 a2',
                avalue a1 ->
-               a2 |- b ~ m ==A> a2' ->
-               (AMult a1 a2) |- b ~ m ==A> (AMult a1 a2')
+               a2 /- b ~ m ==A> a2' ->
+               (AMult a1 a2) /- b ~ m ==A> (AMult a1 a2')
 
 | AS_VarBuf : forall b m x n,
                 get b x = Some n ->
-                (AVar x) |- b ~ m ==A> (ANum n)
+                (AVar x) /- b ~ m ==A> (ANum n)
 | AS_VarMem : forall b m x,
                 get b x = None ->
-                (AVar x) |- b ~ m ==A> ANum (m x)
+                (AVar x) /- b ~ m ==A> ANum (m x)
 
-where "a1 '|-' b '~' m '==A>' a2" := (astep b m a1 a2).
+where "a1 '/-' b '~' m '==A>' a2" := (astep b m a1 a2).
 
 Hint Constructors astep.
 
@@ -526,7 +524,7 @@ Tactic Notation "astep_cases" tactic(first) ident(c) :=
   | Case_aux c "AS_VarBuf" | Case_aux c "AS_VarMem" ].
 
 Theorem strong_progress_a :
-  forall a b m, avalue a \/ (exists a', a |- b ~ m ==A> a').
+  forall a b m, avalue a \/ (exists a', a /- b ~ m ==A> a').
 Proof with eauto.
   intros.
   aexp_cases (induction a) Case;
@@ -553,6 +551,42 @@ Proof with eauto.
     right.
     destruct (get b v) eqn:Hb...
 Qed.
+
+
+Ltac find_avalue_astep :=
+  match goal with
+      H1: ANum ?n /- ?b ~ ?m ==A> ?a' |- _ => invf H1
+  end.
+
+Ltac find_avalue :=
+  match goal with
+      H1: avalue ?a |- _ => inv H1
+  end.
+
+Theorem astep_deterministic: forall b m a a1 a2,
+                               a /- b ~ m ==A> a1 ->
+                               a /- b ~ m ==A> a2 ->
+                               a1 = a2.
+Proof with auto.
+  intros.
+  generalize dependent a2.
+  astep_cases (induction H) Case;
+    intros; simpl;
+    inv H0;
+    auto;
+    repeat find_avalue;
+    try (find_avalue_astep).
+  Case "AS_Plus1".
+    rewrite -> (IHastep _ H6)...
+    inv H1; try find_avalue_astep.
+    inv H6; find_avalue; try find_avalue_astep...
+  Case "AS_Plus2".
+    inv H1; try find_avalue_astep.
+    rewrite -> (IHastep _ H7)...
+(* TODO: too many details here, think of another way to prove this! *)
+    Admitted.
+
+Hint Resolve astep_deterministic.
 
 (* TODO: Do I need to prove any corollary as that in Smallstep.v?
 May be used in proof of deterministic.
@@ -585,46 +619,46 @@ Inductive bvalue : bexp -> Prop :=
 
 Hint Constructors bvalue.
 
-Reserved Notation "b1 '|-' buf '~' mem '==B>' b2" (at level 80).
+Reserved Notation "b1 '/-' buf '~' mem '==B>' b2" (at level 80).
 
 Inductive bstep : buffer -> memory -> bexp -> bexp -> Prop :=
 | BS_Not : forall buf mem b,
-             BNot (BBool b) |- buf ~ mem ==B> BBool (negb b)
+             BNot (BBool b) /- buf ~ mem ==B> BBool (negb b)
 | BS_Not1 : forall buf mem b b',
-              b |- buf ~ mem ==B> b' ->
-              (BNot b) |- buf ~ mem ==B> BNot b'
+              b /- buf ~ mem ==B> b' ->
+              (BNot b) /- buf ~ mem ==B> BNot b'
 
 | BS_And : forall buf mem b1 b2,
-             (BAnd (BBool b1) (BBool b2)) |- buf ~ mem ==B> BBool (andb b1 b2)
+             (BAnd (BBool b1) (BBool b2)) /- buf ~ mem ==B> BBool (andb b1 b2)
 | BS_And1 : forall buf mem be1 be1' be2,
-              be1 |- buf ~ mem ==B> be1' ->
-              (BAnd be1 be2) |- buf ~ mem ==B> BAnd be1' be2
+              be1 /- buf ~ mem ==B> be1' ->
+              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1' be2
 | BS_And2 : forall buf mem be1 be2 be2',
               bvalue be1 ->
-              be2 |- buf ~ mem ==B> be2' ->
-              (BAnd be1 be2) |- buf ~ mem ==B> BAnd be1 be2'
+              be2 /- buf ~ mem ==B> be2' ->
+              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1 be2'
 
 | BS_Eq : forall buf mem n1 n2,
-            (BEq (ANum n1) (ANum n2)) |- buf ~ mem ==B> BBool (beq_nat n1 n2)
+            (BEq (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (beq_nat n1 n2)
 | BS_Eq1 : forall buf mem a1 a1' a2,
-             a1 |- buf ~ mem ==A> a1' ->
-             (BEq a1 a2) |- buf ~ mem ==B> BEq a1' a2
+             a1 /- buf ~ mem ==A> a1' ->
+             (BEq a1 a2) /- buf ~ mem ==B> BEq a1' a2
 | BS_Eq2 : forall buf mem a1 a2 a2',
              avalue a1 ->
-             a2 |- buf ~ mem ==A> a2' ->
-             (BEq a1 a2) |- buf ~ mem ==B> BEq a1 a2'
+             a2 /- buf ~ mem ==A> a2' ->
+             (BEq a1 a2) /- buf ~ mem ==B> BEq a1 a2'
 
 | BS_Le : forall buf mem n1 n2,
-            (BLe (ANum n1) (ANum n2)) |- buf ~ mem ==B> BBool (ble_nat n1 n2)
+            (BLe (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (ble_nat n1 n2)
 | BS_Le1 : forall buf mem a1 a1' a2,
-             a1 |- buf ~ mem ==A> a1' ->
-             (BLe a1 a2) |- buf ~ mem ==B> BLe a1' a2
+             a1 /- buf ~ mem ==A> a1' ->
+             (BLe a1 a2) /- buf ~ mem ==B> BLe a1' a2
 | BS_Le2 : forall buf mem a1 a2 a2',
              avalue a1 ->
-             a2 |- buf ~ mem ==A> a2' ->
-             (BLe a1 a2) |- buf ~ mem ==B> BLe a1 a2'
+             a2 /- buf ~ mem ==A> a2' ->
+             (BLe a1 a2) /- buf ~ mem ==B> BLe a1 a2'
 
-where "b1 '|-' buf '~' mem '==B>' b2" := (bstep buf mem b1 b2).
+where "b1 '/-' buf '~' mem '==B>' b2" := (bstep buf mem b1 b2).
 
 Hint Constructors bstep.
 
@@ -636,7 +670,7 @@ Tactic Notation "bstep_cases" tactic(first) ident(c) :=
   | Case_aux c "BS_Le" | Case_aux c "BS_Le1" | Case_aux c "BS_Le2" ].
 
 Theorem strong_progress_b :
-  forall b buf mem, bvalue b \/ (exists b', b |- buf ~ mem ==B> b').
+  forall b buf mem, bvalue b \/ (exists b', b /- buf ~ mem ==B> b').
 Proof with eauto.
   intros.
   bexp_cases (induction b) Case;
@@ -670,6 +704,39 @@ Proof with eauto.
     SCase "a1 ==A> a1'".
       inv H...
 Qed.
+
+Ltac find_bvalue_bstep :=
+  match goal with
+      H1: BBool ?b /- ?buf ~ ?mem ==B> ?b' |- _ => invf H1
+  end.
+
+Ltac find_bvalue :=
+  match goal with
+      H1: bvalue ?a |- _ => inv H1
+  end.
+
+
+Theorem bstep_deterministic:
+  forall buf mem b b1 b2,
+    b /- buf ~ mem ==B> b1 ->
+    b /- buf ~ mem ==B> b2 ->
+    b1 = b2.
+Proof with auto.
+  intros.
+  generalize dependent b2.
+  bstep_cases (induction H) Case;
+    intros; inv H0;
+    try find_bvalue;
+    try find_bvalue_bstep;
+    auto.
+  Case "BS_Not1".
+    rewrite (IHbstep _ H4)...
+  Case "BS_And1".
+    rewrite (IHbstep _ H6)...
+  Case "BS_And2".
+    inv H1.
+    Admitted.
+(* TODO: excruciating.. *)
 
 (* TODO: Do I need to prove any corollary as that in Smallstep.v?
 May be used in proof of deterministic.
@@ -761,7 +828,7 @@ Inductive cstep : tid -> state -> state -> Prop :=
              t @ (ST (x ::= ANum n) buf mem lks) ==>
                (ST SKIP (write buf x n) mem lks)
 | CS_AssStep : forall t x a a' buf mem lks,
-                 a |- buf ~ mem ==A> a' ->
+                 a /- buf ~ mem ==A> a' ->
                  t @ (ST (x ::= a) buf mem lks) ==> (ST (x ::= a') buf mem lks)
 
 | CS_Seq : forall t c2 buf mem lks,
@@ -777,7 +844,7 @@ Inductive cstep : tid -> state -> state -> Prop :=
                  t @ (ST (IFB (BBool false) THEN c1 ELSE c2 FI) buf mem lks) ==>
                    (ST c2 buf mem lks)
 | CS_IfStep : forall t c1 c2 be be' buf mem lks,
-                be |- buf ~ mem ==B> be' ->
+                be /- buf ~ mem ==B> be' ->
                 t @ (ST (IFB be THEN c1 ELSE c2 FI) buf mem lks) ==>
                   (ST (IFB be' THEN c1 ELSE c2 FI) buf mem lks)
 
@@ -867,6 +934,36 @@ Theorem thread_stuck_resume:
     lks' l = None \/ lks' l = Some t ->
     exists st', t @ (ST (LOCK l) buf mem lks') ==> st'.
 Proof. eauto. Qed.
+
+
+(* cstep is no longer deterministic, one state may execute one
+command, it may also flush one write to memory *)
+Theorem cstep_not_deterministic:
+  ~ (forall t st st1 st2,
+       t @ st ==> st1 ->
+       t @ st ==> st2 ->
+       st1 = st2).
+Proof with auto.
+  intros Hf.
+  remember (SKIP ;; SKIP) as c.
+  remember ([(X, 100)]) as buf.
+  remember (ST c buf empty_memory empty_locks) as st.
+  remember (ST SKIP buf empty_memory empty_locks) as st1.
+  remember (ST c nil (update empty_memory X 100) empty_locks) as st2.
+  assert (T0 @ st ==> st1).
+    subst...
+  assert (T0 @ st ==> st2).
+    subst.
+    apply CS_Flush.
+    simpl...
+  assert (st1 = st2).
+    eapply Hf.
+    apply H.
+    assumption.
+  subst.
+  clear H H0.
+  inv H1.
+Qed.
 (* ---------------- end of Command & State (uni) ---------------- *)
 
 
