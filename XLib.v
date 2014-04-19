@@ -89,7 +89,6 @@ Hint Resolve functional_extensionality.
 
 (* ---------------------------------------------------------------- *)
 (* For arithmatic & boolean operations *)
-
 Fixpoint ble_nat (n m : nat) : bool :=
   match n with
     | O => true
@@ -107,4 +106,47 @@ Definition hd {X} (l : list X) : option X :=
     | nil => None
     | hd :: _ => Some hd
   end.
+
+
+(* ---------------------------------------------------------------- *)
+(* For multistep *)
+Definition relation (X:Type) := X -> X -> Prop.
+
+Definition deterministic {X: Type} (R: relation X) :=
+  forall x y1 y2, R x y1 -> R x y2 -> y1 = y2.
+
+Hint Unfold deterministic.
+
+Inductive multi {X:Type} (R: relation X) : X -> X -> Prop :=
+| multi_refl  : forall x,
+                  multi R x x
+| multi_step : forall x y z,
+                 R x y ->
+                 multi R y z ->
+                 multi R x z.
+
+Hint Constructors multi.
+
+Tactic Notation "multi_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "multi_refl" | Case_aux c "multi_step" ].
+
+Theorem multi_R : forall (X:Type) (R:relation X) (x y : X),
+                    R x y -> multi R x y.
+Proof. eauto. Qed.
+
+Hint Resolve multi_R.
+
+Theorem multi_trans :
+  forall (X:Type) (R: relation X) (x y z : X),
+      multi R x y  ->
+      multi R y z ->
+      multi R x z.
+Proof.
+  intros X R x y z Hxy Hyz.
+  multi_cases (induction Hxy) Case;
+    simpl; eauto.
+Qed.
+
+Hint Resolve multi_trans.
 

@@ -14,20 +14,20 @@ Contraints:
 * If var is not in memory, it will return 0 as default value, rather than None.
 
 Andriy LIN
-Updated: 04/16/2014
+Updated: 04/19/2014
 
 
 Structure:
 * Variable
-* Main memory
+* Memory
 * Thread ID
-* LockID and Locks
-* Write Buffers
-* State
-* Arithmatic Expressions
-* Boolean Expressions
-* Commands
-* TODO..
+* Locks
+* Write Buffer
+* Arithmatic Expression
+* Boolean Expression
+* Commands & State (uni-thread)
+* Threads & Configuration (multi-threads)
+* Proof of TSO Semantics
 *)
 
 Require Import Coq.Lists.ListSet.
@@ -90,7 +90,7 @@ Hint Unfold Z.
 (* ---------------- end of Var ---------------- *)
 
 
-(* ---------------- Main Memory ---------------- *)
+(* ---------------- Memory ---------------- *)
 Definition memory : Type := var -> nat.
 
 Definition empty_memory : memory := fun _ => 0.
@@ -159,7 +159,7 @@ Proof with auto.
 Qed.
 
 Hint Resolve update_permute.
-(* ---------------- end of Main Memory ---------------- *)
+(* ---------------- end of Memory ---------------- *)
 
 
 (* ---------------- Thread ID ---------------- *)
@@ -218,6 +218,9 @@ Hint Unfold T2.
 
 (* The following is to define a set that contains tids of all current threads *)
 Definition empty_tids := empty_set tid.
+
+Definition size_tids (tids : set tid) : nat :=
+  length tids.
 
 Definition in_tids : tid -> set tid -> bool :=
   set_mem eq_tid_dec.
@@ -387,65 +390,6 @@ Proof with auto.
 Qed.
 
 End TestWriteBuffer.
-
-(*
-Definition buffer_status : Type := tid -> buffer.
-
-Definition empty_buffers : buffer_status :=
-  fun _ => nil.
-
-Definition write (bs : buffer_status) (t : tid) (x : var) (n : nat) : buffer_status :=
-  fun t' => if eq_tid_dec t t'
-            then _write (bs t) x n
-            else bs t'.
-
-Hint Unfold write.
-
-(* remove the oldest write in the buffer *)
-Definition flush (bs : buffer_status) (t : tid) : buffer_status :=
-  fun t' => if eq_tid_dec t t'
-            then tl (bs t)
-            else bs t'.
-
-Hint Unfold flush.
-
-Theorem test_write_correctness:
-  forall t x n, oldest (write empty_buffers t x n) t = Some (x, n).
-Proof with auto.
-  intros.
-  unfold write, oldest.
-  rewrite -> eq_tid...
-Qed.
-
-Theorem test_flush_correctness:
-  forall t x n, flush (write empty_buffers t x n) t = empty_buffers.
-Proof with auto.
-  intros.
-  apply functional_extensionality.
-  intros t'.
-  unfold flush, write, empty_buffers.
-  rewrite -> eq_tid.
-  destruct (eq_tid_dec t t')...
-Qed.
-
-Definition get (bs : buffer_status) (t : tid) (x : var) : option nat :=
-  _get (bs t) x.
-
-Theorem test_get_correctness:
-  forall bs t x n1 n2, get (write (write bs t x n1) t x n2) t x = Some n2.
-Proof with auto.
-  intros.
-  unfold write, get.
-  repeat rewrite -> eq_tid.
-  induction (bs t) as [ | hd tl];
-    simpl.
-  Case "bs t = nil".
-    repeat rewrite -> eq_var...
-  Case "bs t = hd :: tl".
-    rewrite -> IHtl.
-    destruct hd...
-Qed.
-*)
 (* ---------------- end of Write Buffer ---------------- *)
 
 
@@ -855,7 +799,6 @@ Inductive ststep : tid -> state -> state -> Prop :=
 | ST_Bar : forall t buf mem lks,
              oldest buf = None ->
              t @ (ST (BAR MFENCE) buf mem lks) ==> (ST SKIP buf mem lks)
-(* TODO: One idea is to let Flush be a op in configuration rather than state, so as to make ststep deterministic? *)
 | ST_Flush : forall t buf mem lks x n c,
                (* Here either blocked or not it can flush anyway *)
                oldest buf = Some (x, n) ->
@@ -937,7 +880,7 @@ Theorem thread_stuck_resume:
 Proof. eauto. Qed.
 
 
-(* cstep is no longer deterministic, one state may execute one
+(* ststep is no longer deterministic, one state may execute one
 command, it may also flush one write to memory *)
 Theorem ststep_not_deterministic:
   ~ (forall t st st1 st2,
@@ -1007,6 +950,8 @@ Inductive cfgvalue : configuration -> Prop :=
 (*| CFGV_Deadlock: TODO *)
 .
 
+Hint Constructors cfgvalue.
+
 Reserved Notation "cfg1 '-->' cfg2" (at level 60).
 
 Inductive cfgstep : configuration -> configuration -> Prop :=
@@ -1047,138 +992,149 @@ Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configurat
 Definition init_cfg (lc : list cmd) : configuration :=
   _init_cfg lc 0 empty_configuration.
 
+Hint Unfold init_cfg.
+
+
+Definition multicfgstep := multi cfgstep.
+Notation "cfg1 '-->*' cfg2" := (multicfgstep cfg1 cfg2) (at level 40).
+
 (* All above are the definitions for the parallel language *)
 (* ---------------- end of Threads & Configuration ---------------- *)
 
 
+(* ---------------- Proof of having TSO Semantics ---------------- *)
+Module TsoSemanticsProof.
 
-(* ---------------- State & Multi-Relation ---------------- *)
-(* State consists of necessary information for a tid*cmd to execute:
-   * buffer status
-   * memory
-   * lock status
-*)
-Record state := ST {
-  st_bs : buffer_status;
-  st_mem : memory;
-  st_ls : lock_status
-}.
+(* Below is the example in paper A Better x86 Memory Model: x86-TSO *)
+Definition EAX : var := Var 100.
+Definition EBX : var := Var 101.
 
-Hint Constructors state.
+Definition proc0 : cmd :=
+  X ::= ANum 1 ;;
+  EAX ::= AVar X ;;
+  EBX ::= AVar Y.
 
-Definition empty_state := ST empty_buffers empty_memory empty_locks.
+Definition proc1 : cmd :=
+  Y ::= ANum 2 ;;
+  X ::= ANum 2.
 
+Definition codes : list cmd :=
+  proc0 :: proc1 :: nil.
 
-(* TODO: is the relation & normal form definition here necessary?? *)
-Definition relation (X:Type) := tid -> X -> X -> Prop.
-
-Definition deterministic {X: Type} (R: relation X) :=
-  forall t x y1 y2, R t x y1 -> R t x y2 -> y1 = y2.
-
-Hint Unfold deterministic.
-
-Inductive multi {X:Type} (R: relation X) : tid -> X -> X -> Prop :=
-| multi_refl  : forall t x,
-                  multi R t x x
-| multi_step : forall t x y z,
-                 R t x y ->
-                 multi R t y z ->
-                 multi R t x z.
-
-Hint Constructors multi.
-
-Tactic Notation "multi_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "multi_refl" | Case_aux c "multi_step" ].
-
-Theorem multi_R : forall (X:Type) (R:relation X) (t : tid) (x y : X),
-                    R t x y -> multi R t x y.
-Proof. eauto. Qed.
-
-Hint Resolve multi_R.
-
-Theorem multi_trans :
-  forall (X:Type) (R: relation X) (t : tid) (x y z : X),
-      multi R t x y  ->
-      multi R t y z ->
-      multi R t x z.
+Example preprocess:
+  forall tids thds mem lks,
+    init_cfg codes = (CFG tids thds mem lks) ->
+    size_tids tids = 2 /\ in_tids T0 tids = true /\ in_tids T1 tids = true
+    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil).
 Proof.
-  intros X R t x y z Hxy Hyz.
-  multi_cases (induction Hxy) Case;
-    simpl; eauto.
+  intros.
+  unfold codes, proc0, proc1, init_cfg in *.
+  inv H.
+  auto.
 Qed.
 
-Hint Resolve multi_trans.
-(* ---------------- end of State & Multi-Relation ---------------- *)
+(* Note: Here is one possible final state on a TSO memory model. The
+proof below shows that it can be reached by executing the language I
+defined above, which means my language does expose TSO semantics!
+ *)
+Theorem tso_semantics: exists thds mem lks,
+                         init_cfg codes -->* (CFG empty_tids thds mem lks) /\
+                         cfgvalue (CFG empty_tids thds mem lks) /\ (* final state *)
+                         mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
+Proof with eauto.
+  eexists.
+  eexists.
+  eexists.
+  split.
+
+  (* proc1: write of Y := 2 is buffered *)
+  eapply multi_step.
+  apply CFGS_One with (t := T1) (c := proc1) (b := nil)...
+  unfold proc1...
+  eapply multi_step.
+  apply CFGS_One with (t := T1) (c := (SKIP;; X ::= (ANum 2))) (b := [(Y, 2)])...
+
+  (* proc0: write of X := 1 is buffered *)
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := proc0) (b := nil)...
+  unfold proc0...
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (SKIP;; EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+
+  (* proc0: read EAX := X from write buffer *)
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+  constructor.
+  constructor.
+  constructor.
+  reflexivity.
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (EAX ::= (ANum 1);; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (SKIP;; (EBX ::= (AVar Y)))) (b := [(X, 1); (EAX, 1)])...
+
+  (* proc0: read EBX := Y from memory *)
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (EBX ::= (AVar Y))) (b := [(X, 1); (EAX, 1)])...
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := (EBX ::= (ANum 0))) (b := [(X, 1); (EAX, 1)])...
+  (* after this, c := SKIP, b := (X, 1) :: (EAX, 1) :: (EBX, 0) :: nil *)
+
+  (* proc1: write of X := 2 buffered *)
+  eapply multi_step.
+  apply CFGS_One with (t := T1) (c := (X ::= (ANum 2))) (b := [(Y, 2)])...
+  (* after this, c := SKIP, b := (Y, 2) :: (X, 2) :: nil *)
+
+  (* proc1: flushes write Y := 2 to memory *)
+  eapply multi_step.
+  apply CFGS_One with (t := T1) (c := SKIP) (b := [(Y, 2); (X, 2)])...
+  constructor.
+  simpl...
+
+  (* proc1: flushes write X := 2 to memory *)
+  eapply multi_step.
+  apply CFGS_One with (t := T1) (c := SKIP) (b := [(X, 2)])...
+  constructor.
+  simpl...
+
+  (* proc1: done *)
+  eapply multi_step.
+  apply CFGS_Done with (t := T1)...
+
+  (* proc0: flushes write X := 1 to memory *)
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := SKIP) (b := [(X, 1); (EAX, 1); (EBX, 0)])...
+  constructor.
+  simpl...
+
+  (* proc0: flushes all else in the write buffer to memory *)
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := SKIP) (b := [(EAX, 1); (EBX, 0)])...
+  constructor.
+  simpl...
+  eapply multi_step.
+  apply CFGS_One with (t := T0) (c := SKIP) (b := [(EBX, 0)])...
+  constructor.
+  simpl...
+
+  (* proc0: done *)
+  eapply multi_step.
+  apply CFGS_Done with (t := T0)...
+
+  (* DONE, final state: EAX = 1 /\ EBX = 0 /\ X = 1 *)
+  apply multi_refl.
+  auto.
+Qed.
+
+End TsoSemanticsProof.
+(* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
 
-
-
-
-
-
+(* TODO Resume here *)
 
 (* Due to the definition of relation, normal_form is only for cstep. *)
 Definition normal_form {X:Type} (R : relation X) (x : X) : Prop :=
   forall t, ~ exists x', R t x x'.
-
-
-
-
-
-Notation "'PAR' t1 '@' c1 'WITH' t2 '@' c2 'END'" :=
-
-| CS_Par1 : forall st c1 c1' c2 st',
-              c1 / st ==> c1' / st' -> 
-              (PAR c1 WITH c2 END) / st ==> (PAR c1' WITH c2 END) / st'
-| CS_Par2 : forall st c1 c2 c2' st',
-              c2 / st ==> c2' / st' ->
-              (PAR c1 WITH c2 END) / st ==> (PAR c1 WITH c2' END) / st'
-| CS_ParDone : forall st,
-                 (PAR SKIP WITH SKIP END) / st ==> SKIP / st
-
-
-
-Hint Constructors ceval.
-
-Tactic Notation "ceval_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "CE_Skip" | Case_aux c "CE_Ass"
-  | Case_aux c "CE_Seq" | Case_aux c "CE_IfTrue"
-  | Case_aux c "CE_IfFalse" | Case_aux c "CE_WhileEnd"
-  | Case_aux c "CE_WhileLoop" ].
-
-
-Theorem ceval_deterministic:
-  forall c st st1 st2,
-    c / st || st1  ->
-    c / st || st2 ->
-    st1 = st2.
-Proof with auto.
-  intros c st st1 st2 E1 E2.
-  generalize dependent st2.
-  ceval_cases (induction E1) Case;
-           intros st2 E2; inversion E2; subst; auto;
-           try find_rwinv.
-  Case "CE_Seq".
-    apply IHE1_1 in H1.
-    subst...
-  Case "CE_WhileLoop".
-    SCase "b1 evaluates to true".
-      apply IHE1_1 in H3.
-      subst.
-      apply IHE1_2...
-Qed.
-
-Hint Resolve ceval_deterministic.
-
-
-(* TODO: also prove the "strong_progress" version for cstep, regarding normal_form *)
-(* ---------------- end of Fence & Command ---------------- *)
-
-
-
-
 
 
 
@@ -1336,17 +1292,8 @@ Hint Unfold is_wp.
 (* ---------------- end of Hoare Logic ---------------- *)
 
 
-(* ---------------- Smallstep Semantics ---------------- *)
-(*
-TODO: Change the operational semantics to this smallstep semantics
-It's better in an parallel environment.
- *)
-(* ---------------- end of Smallstep Semantics ---------------- *)
-
-
 (*
 Doubts:
-* Do I need to specify Registers?? No.
 * Do I need to specify Barriers?? I think so.
 * What's the difference between MFENCE, LFENCE, SFENCE.
 * Do I need to use events to abstract? maybe yes, I may define that:
@@ -1356,7 +1303,6 @@ Doubts:
 
 (*
 TODOs:
-1. Add test cases (Example) to check the correctness of each definition above.
 2. Will Hoare Logic be used in the project? I am not sure.
 3. Do I need to extend the language to contain Lambda?
 4. Add BOr into bexp??
