@@ -690,16 +690,6 @@ Proof with eauto.
       inv H...
 Qed.
 
-Ltac find_bvalue_bstep :=
-  match goal with
-      H1: BBool ?b /- ?buf ~ ?mem ==B> ?b' |- _ => invf H1
-  end.
-
-Ltac find_bvalue :=
-  match goal with
-      H1: bvalue ?a |- _ => inv H1
-  end.
-
 
 Theorem bstep_deterministic:
   forall buf mem b b1 b2,
@@ -710,18 +700,52 @@ Proof with auto.
   intros.
   generalize dependent b2.
   bstep_cases (induction H) Case;
-    intros; inv H0;
-    try find_bvalue;
-    try find_bvalue_bstep;
-    auto.
+    intros.
+  Case "BS_Not".
+    inv H0...
+    invf H3.
   Case "BS_Not1".
-    rewrite (IHbstep _ H4)...
+    inv H0...
+    invf H.
+    rewrite -> (IHbstep b'0)...
+  Case "BS_And".
+    inv H0; try solve by inversion 1...
   Case "BS_And1".
-    rewrite (IHbstep _ H6)...
+    inv H0; try solve by inversion 1...
+    rewrite -> (IHbstep be1'0)...
+    inv H5; invf H.
   Case "BS_And2".
-    inv H1.
-    Admitted.
-(* TODO: excruciating.. *)
+    inv H1; try solve by inversion 1...
+    inv H; invf H7.
+    rewrite -> (IHbstep be2'0)...
+  Case "BS_Eq".
+    inv H0; try solve by inversion 1...
+  Case "BS_Eq1".
+    inv H0; try solve by inversion 1...
+    assert (a1' = a1'0) by eauto.
+    subst...
+    inv H5; invf H.
+  Case "BS_Eq2".
+    inv H1...
+    invf H0.
+    inv H; invf H7.
+    assert (a2' = a2'0) by eauto.
+    subst...
+  Case "BS_Le".
+    inv H0; try solve by inversion 1...
+  Case "BS_Le1".
+    inv H0; try solve by inversion 1...
+    assert (a1' = a1'0) by eauto.
+    subst...
+    inv H5; invf H.
+  Case "BS_Le2".
+    inv H1; try solve by inversion 1...
+    inv H; invf H7.
+    assert (a2' = a2'0) by eauto.
+    subst...
+Qed.
+
+Hint Resolve bstep_deterministic.
 
 (* TODO: Do I need to prove any corollary as that in Smallstep.v?
 May be used in proof of deterministic.
