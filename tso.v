@@ -373,6 +373,24 @@ Fixpoint get (b : buffer) (x : var) : option nat :=
                      end
   end.
 
+Theorem get_deterministic:
+  forall b x r1 r2, get b x = r1 ->
+                    get b x = r2 ->
+                    r1 = r2.
+Proof with auto.
+  intros b.
+  induction b as [ | h t];
+    intros.
+  Case "b = nil".
+    inv H...
+  Case "b = h :: t".
+    destruct (get t x) eqn:Ht;
+      simpl in *.
+    destruct h; subst...
+    destruct h; subst...
+Qed.
+
+Hint Resolve get_deterministic.
 
 Module TestWriteBuffer.
 
@@ -497,16 +515,6 @@ Proof with eauto.
 Qed.
 
 
-Ltac find_avalue_astep :=
-  match goal with
-      H1: ANum ?n /- ?b ~ ?m ==A> ?a' |- _ => invf H1
-  end.
-
-Ltac find_avalue :=
-  match goal with
-      H1: avalue ?a |- _ => inv H1
-  end.
-
 Theorem astep_deterministic: forall b m a a1 a2,
                                a /- b ~ m ==A> a1 ->
                                a /- b ~ m ==A> a2 ->
@@ -515,20 +523,53 @@ Proof with auto.
   intros.
   generalize dependent a2.
   astep_cases (induction H) Case;
-    intros; simpl;
-    inv H0;
-    auto;
-    repeat find_avalue;
-    try (find_avalue_astep).
+    intros.
+  Case "AS_Plus".
+    inv H0...
+    invf H5.
+    invf H6.
   Case "AS_Plus1".
-    rewrite -> (IHastep _ H6)...
-    inv H1; try find_avalue_astep.
-    inv H6; find_avalue; try find_avalue_astep...
+    inv H0; try solve by inversion 1.
+    rewrite -> (IHastep a1'0)...
+    inv H5; inv H.
   Case "AS_Plus2".
-    inv H1; try find_avalue_astep.
-    rewrite -> (IHastep _ H7)...
-(* TODO: too many details here, think of another way to prove this! *)
-    Admitted.
+    inv H1; try solve by inversion 1.
+    inv H; inv H7.
+    rewrite -> (IHastep a2'0)...
+  Case "AS_Minus".
+    inv H0...
+    invf H5.
+    invf H6.
+  Case "AS_Minus1".
+    inv H0; try solve by inversion 1.
+    rewrite -> (IHastep a1'0)...
+    inv H5; inv H.
+  Case "AS_Minus2".
+    inv H1; try solve by inversion 1.
+    inv H; invf H7.
+    rewrite -> (IHastep a2'0)...
+  Case "AS_Mult".
+    inv H0...
+    invf H5.
+    invf H6.
+  Case "AS_Mult1".
+    inv H0; try solve by inversion 1.
+    rewrite -> (IHastep a1'0)...
+    inv H5; invf H.
+  Case "AS_Mult2".
+    inv H1; try solve by inversion 1.
+    inv H; invf H7.
+    rewrite -> (IHastep a2'0)...
+  Case "AS_VarBuf".
+    inv H0.
+    assert (Some n = Some n0).
+      apply get_deterministic with b x...
+    inv H0...
+    rewrite -> H in H4; invf H4.
+  Case "AS_VarMem".
+    inv H0...
+    rewrite -> H in H4; invf H4.
+Qed.
 
 Hint Resolve astep_deterministic.
 
