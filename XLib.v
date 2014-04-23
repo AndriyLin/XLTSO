@@ -1,4 +1,4 @@
-(** * XLib: Library, mostly copied from book Software Foundations *)
+(** * XLib: Library, some copied from book Software Foundations *)
 (* Andriy LIN, for CS565 Programming Language project *)
 
 (* ---------------------------------------------------------------- *)

@@ -11,10 +11,11 @@ Written in Coq, mechanically formalized and verified.
 
 Contraints:
 * It is only a simple language, so the only possible value is nat.
-* If var is not in memory, it will return 0 as default value, rather than None.
+* If var is not in memory, it will return 0 as default value, rather
+  than None.
 
-Andriy LIN
-Updated: 04/19/2014
+Xuankang LIN
+Updated: 04/23/2014
 
 
 Structure:
@@ -28,6 +29,7 @@ Structure:
 * Commands & State (uni-thread)
 * Threads & Configuration (multi-threads)
 * Proof of TSO Semantics
+* TODO.. More?
 *)
 
 Require Import Coq.Lists.ListSet.
@@ -299,7 +301,7 @@ Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 Hint Unfold lock.
 
 (* For simplicity (without checking program correctness), it won't
-crush even t doesn't hold the lock. *)
+crush even if t doesn't hold the lock. *)
 Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
   match st l with
     | Some t' => if eq_tid_dec t t'
@@ -807,7 +809,7 @@ Notation "'UNLOCK' l" :=
   (CUnlock l) (at level 80).
 
 
-(* state contains all that ONE single thread can change *)
+(* state contains all those ONE single thread can change *)
 Record state := ST {
   st_cmd : cmd;
   st_buf : buffer;
@@ -865,7 +867,7 @@ Inductive ststep : tid -> state -> state -> Prop :=
              oldest buf = None ->
              t @ (ST (BAR MFENCE) buf mem lks) ==> (ST SKIP buf mem lks)
 | ST_Flush : forall t buf mem lks x n c,
-               (* Here either blocked or not it can flush anyway *)
+               (* Here no matter blocked or not, it can flush anyway *)
                oldest buf = Some (x, n) ->
                t @ (ST c buf mem lks) ==> (ST c (flush buf) (update mem x n) lks)
 
@@ -946,7 +948,7 @@ Proof. eauto. Qed.
 
 
 (* ststep is no longer deterministic, one state may execute one
-command, it may also flush one write to memory *)
+command, it may also flush one unit of its write buffer to memory *)
 Theorem ststep_not_deterministic:
   ~ (forall t st st1 st2,
        t @ st ==> st1 ->
@@ -977,7 +979,7 @@ Qed.
 
 
 (* ---------------- Threads & Configuration ---------------- *)
-(* Command and Write Buffer is thread private *)
+(* Only Command and Write Buffer is thread private *)
 Definition threads := tid -> (cmd * buffer).
 
 Definition empty_threads : threads :=
@@ -993,7 +995,7 @@ Definition override (ts: threads) (t : tid) (c : cmd) (b : buffer) :=
 Hint Unfold override.
 
 
-(* configuration contains everything that may be modified *)
+(* configuration contains everything that may be modified, for all threads *)
 Record configuration := CFG {
   cfg_tids : set tid;
   cfg_thds : threads;
@@ -1020,13 +1022,13 @@ Hint Constructors cfgvalue.
 Reserved Notation "cfg1 '-->' cfg2" (at level 60).
 
 Inductive cfgstep : configuration -> configuration -> Prop :=
-(* One thread ends its job *)
+(* One thread already ends its job, thus remove it *)
 | CFGS_Done : forall t tids thds mem lks,
                 in_tids t tids = true ->
                 thds t = (SKIP, nil) ->
                 (CFG tids thds mem lks) --> (CFG (remove_tid t tids) thds mem lks)
 
-(* One thread moves forward *)
+(* One thread can move one step forward, in terms of "state" *)
 | CFGS_One : forall t tids thds c c' b b' mem mem' lks lks',
                in_tids t tids = true ->
                thds t = (c, b) ->
@@ -1042,6 +1044,7 @@ Tactic Notation "cfgstep_cases" tactic(first) ident(c) :=
   [ Case_aux c "CFG_Done" | Case_aux c "CFG_One" ].
 
 
+(* used in init_cfg() *)
 Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configuration :=
   match lc with
     | nil => accu
@@ -1054,6 +1057,8 @@ Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configurat
       end
   end.
 
+(* init_cfg is a function used to generate the initial configuration
+from a list of commands *)
 Definition init_cfg (lc : list cmd) : configuration :=
   _init_cfg lc 0 empty_configuration.
 
@@ -1070,7 +1075,19 @@ Notation "cfg1 '-->*' cfg2" := (multicfgstep cfg1 cfg2) (at level 40).
 (* ---------------- Proof of having TSO Semantics ---------------- *)
 Module TsoSemanticsProof.
 
-(* Below is the example in paper A Better x86 Memory Model: x86-TSO *)
+(* Below is the example in P393 of paper "A Better x86 Memory Model: x86-TSO":
+
+  n6:
+          |      proc0      |      proc1
+  poi: 0  |  MOV [X] <- $1  |  MOV [Y] <- $2
+  poi: 1  |  MOV EAX <- [X] |  MOV [X] <- $2
+  poi: 2  |  MOV EBX <- [Y] |
+
+  Final: EAX = 1 /\ EBX = 0 /\ [X] = 1
+
+  TSO allows this final result, so proving that the final situation is
+  reachable should prove that the language exposes TSO semantics.
+*)
 Definition EAX : var := Var 100.
 Definition EBX : var := Var 101.
 
@@ -1086,6 +1103,7 @@ Definition proc1 : cmd :=
 Definition codes : list cmd :=
   proc0 :: proc1 :: nil.
 
+(* The following is to prove that the init_cfg function works as expected *)
 Example preprocess:
   forall tids thds mem lks,
     init_cfg codes = (CFG tids thds mem lks) ->
@@ -1098,14 +1116,13 @@ Proof.
   auto.
 Qed.
 
-(* Note: Here is one possible final state on a TSO memory model. The
-proof below shows that it can be reached by executing the language I
-defined above, which means my language does expose TSO semantics!
- *)
-Theorem tso_semantics: exists thds mem lks,
-                         init_cfg codes -->* (CFG empty_tids thds mem lks) /\
-                         cfgvalue (CFG empty_tids thds mem lks) /\ (* final state *)
-                         mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
+(* The following is to prove that the final state is actually
+reachable by the language and semantics I defined above *)
+Theorem tso_semantics:
+  exists thds mem lks,
+    init_cfg codes -->* (CFG empty_tids thds mem lks) /\
+    cfgvalue (CFG empty_tids thds mem lks) /\ (* final state *)
+    mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
   eexists.
   eexists.
@@ -1143,12 +1160,12 @@ Proof with eauto.
   apply CFGS_One with (t := T0) (c := (EBX ::= (AVar Y))) (b := [(X, 1); (EAX, 1)])...
   eapply multi_step.
   apply CFGS_One with (t := T0) (c := (EBX ::= (ANum 0))) (b := [(X, 1); (EAX, 1)])...
-  (* after this, c := SKIP, b := (X, 1) :: (EAX, 1) :: (EBX, 0) :: nil *)
+  (* after this, proc0: c := SKIP, b := (X, 1) :: (EAX, 1) :: (EBX, 0) :: nil *)
 
   (* proc1: write of X := 2 buffered *)
   eapply multi_step.
   apply CFGS_One with (t := T1) (c := (X ::= (ANum 2))) (b := [(Y, 2)])...
-  (* after this, c := SKIP, b := (Y, 2) :: (X, 2) :: nil *)
+  (* after this, proc1: c := SKIP, b := (Y, 2) :: (X, 2) :: nil *)
 
   (* proc1: flushes write Y := 2 to memory *)
   eapply multi_step.
@@ -1186,7 +1203,7 @@ Proof with eauto.
   eapply multi_step.
   apply CFGS_Done with (t := T0)...
 
-  (* DONE, final state: EAX = 1 /\ EBX = 0 /\ X = 1 *)
+  (* DONE, now the final state is: EAX = 1 /\ EBX = 0 /\ X = 1 *)
   apply multi_refl.
   auto.
 Qed.
@@ -1195,8 +1212,13 @@ End TsoSemanticsProof.
 (* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
 
-(* TODO Resume here *)
 
+(* TODO Resume here
+   Materials below are volatile drafts that are not included yet.
+*)
+
+
+(*
 (* Due to the definition of relation, normal_form is only for cstep. *)
 Definition normal_form {X:Type} (R : relation X) (x : X) : Prop :=
   forall t, ~ exists x', R t x x'.
@@ -1355,6 +1377,7 @@ Definition is_wp P c Q :=
 
 Hint Unfold is_wp.
 (* ---------------- end of Hoare Logic ---------------- *)
+*)
 
 
 (*
