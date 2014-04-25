@@ -15,7 +15,7 @@ Contraints:
   than None.
 
 Xuankang LIN
-Updated: 04/24/2014
+Updated: 04/25/2014
 
 
 Structure:
@@ -29,6 +29,7 @@ Structure:
 * Commands & State (uni-thread)
 * Threads & Configuration (multi-threads)
 * Proof of TSO Semantics
+* Data-Race-Free
 * TODO.. More?
 *)
 
@@ -1174,7 +1175,155 @@ Qed.
 End TsoSemanticsProof.
 (* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
-(* TODO Resume here *)
+
+(* ---------------- Data-Race-Free ---------------- *)
+(* the variable is just about to be written *)
+Inductive writes : cmd -> var -> Prop :=
+| WritesInAss : forall x ae,
+                  avalue ae ->
+                  writes (x ::= ae) x
+| WritesInSeq : forall x c1 c2,
+                  writes c1 x ->
+                  writes (c1 ;; c2) x
+.
+(* Note: Only 2 cases above can write a variable immediately. IF &
+WHILE needs further steps. *)
+
+Hint Constructors writes.
+
+Tactic Notation "writes_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "WritesInAss" | Case_aux c "WritesInSeq" ].
+
+
+(* the variable is just about to be evaluated, used in reads *)
+Inductive var_in_aexp : var -> aexp -> Prop :=
+| VIA_Var : forall x,
+              var_in_aexp x (AVar x)
+
+| VIA_Plus1 : forall x a1 a2,
+                var_in_aexp x a1 ->
+                var_in_aexp x (APlus a1 a2)
+| VIA_Plus2 : forall x a1 a2,
+                avalue a1 ->
+                var_in_aexp x a2 ->
+                var_in_aexp x (APlus a1 a2)
+
+| VIA_Minus1 : forall x a1 a2,
+                 var_in_aexp x a1 ->
+                 var_in_aexp x (AMinus a1 a2)
+| VIA_Minus2 : forall x a1 a2,
+                 avalue a1 ->
+                 var_in_aexp x a2 ->
+                 var_in_aexp x (AMinus a1 a2)
+
+| VIA_Mult1 : forall x a1 a2,
+                var_in_aexp x a1 ->
+                var_in_aexp x (AMult a1 a2)
+| VIA_Mult2 : forall x a1 a2,
+                avalue a1 ->
+                var_in_aexp x a2 ->
+                var_in_aexp x (AMult a1 a2)
+.
+
+Hint Constructors var_in_aexp.
+
+Tactic Notation "var_in_aexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "VIA_Var"
+  | Case_aux c "VIA_Plus1" | Case_aux c "VIA_Plus2"
+  | Case_aux c "VIA_Minus1" | Case_aux c "VIA_Minus2"
+  | Case_aux c "VIA_Mult1" | Case_aux c "VIA_Mult2" ].
+
+
+(* x is just about to be evaluated in bexp, used in reads *)
+Inductive var_in_bexp : var -> bexp -> Prop :=
+| VIB_Not : forall x be,
+              var_in_bexp x be ->
+              var_in_bexp x (BNot be)
+
+| VIB_And1 : forall x be1 be2,
+               var_in_bexp x be1 ->
+               var_in_bexp x (BAnd be1 be2)
+| VIB_And2 : forall x be1 be2,
+               bvalue be1 ->
+               var_in_bexp x be2 ->
+               var_in_bexp x (BAnd be1 be2)
+
+| VIB_Eq1 : forall x a1 a2,
+              var_in_aexp x a1 ->
+              var_in_bexp x (BEq a1 a2)
+| VIB_Eq2 : forall x a1 a2,
+              avalue a1 ->
+              var_in_aexp x a2 ->
+              var_in_bexp x (BEq a1 a2)
+
+| VIB_Le1 : forall x a1 a2,
+              var_in_aexp x a1 ->
+              var_in_bexp x (BLe a1 a2)
+| VIB_Le2 : forall x a1 a2,
+              avalue a1 ->
+              var_in_aexp x a2 ->
+              var_in_bexp x (BLe a1 a2)
+.
+
+Hint Constructors var_in_bexp.
+
+Tactic Notation "var_in_bexp_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "VIB_Not"
+  | Case_aux c "VIB_And1" | Case_aux c "VIB_And2"
+  | Case_aux c "VIB_Eq1" | Case_aux c "VIB_Eq2"
+  | Case_aux c "VIB_Le1" | Case_aux c "VIB_Le2" ].
+
+
+(* the variable is just about to be evaluated in the command*)
+Inductive reads : cmd -> var -> Prop :=
+| ReadsInAss : forall x y a,
+                 var_in_aexp y a ->
+                 reads (x ::= a) y
+| ReadsInIf : forall b c1 c2 x,
+                var_in_bexp x b ->
+                reads (IFB b THEN c1 ELSE c2 FI) x
+| ReadsInSeq : forall c1 c2 x,
+                 reads c1 x ->
+                 reads (c1 ;; c2) x
+.
+(* Note: Only the 3 cases above can read a var immediately. WHILE is
+expanded to "if b then while else skip end" in the semantics so there
+is no need to add WHILE here *)
+
+Hint Constructors reads.
+
+Tactic Notation "reads_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "ReadsInAss"
+  | Case_aux c "ReadsInIf"
+  | Case_aux c "ReadsInSeq" ].
+
+
+Definition uses (c : cmd) (x : var) : Prop :=
+  writes c x \/ reads c x.
+
+Hint Unfold uses.
+
+Inductive datarace : cmd -> cmd -> Prop :=
+| DataRaceL : forall c1 c2 x,
+                writes c1 x ->
+                uses c2 x ->
+                datarace c1 c2
+| DataRaceR : forall c1 c2 x,
+                writes c2 x ->
+                uses c1 x ->
+                datarace c1 c2
+.
+
+Hint Constructors datarace.
+
+(* TODO: Define Data-Race-Free *)
+
+(* ---------------- end of Data-Race-Free ---------------- *)
+
 
 (* Doubts: Do I need to use events to abstract? Yes, I may define
 that: two xx are equiv if they have the same sequence of events *)
