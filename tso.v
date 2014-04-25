@@ -574,12 +574,6 @@ Proof with auto.
 Qed.
 
 Hint Resolve astep_deterministic.
-
-(* TODO: Do I need to prove any corollary as that in Smallstep.v?
-May be used in proof of deterministic.
-Corollary nf_same_as_value : forall t,
-  normal_form step t <-> value t.
-*)
 (* ---------------- end of Arithmatic Expressions ---------------- *)
 
 
@@ -748,37 +742,18 @@ Proof with auto.
 Qed.
 
 Hint Resolve bstep_deterministic.
-
-(* TODO: Do I need to prove any corollary as that in Smallstep.v?
-May be used in proof of deterministic.
-Corollary nf_same_as_value : forall t,
-  normal_form step t <-> value t.
-*)
 (* ---------------- end of Boolean Expressions ---------------- *)
 
 
 (* ---------------- Command & State (uni) ---------------- *)
-Inductive fence : Type :=
-| MFENCE : fence
-.
-
-Hint Constructors fence.
-
-Tactic Notation "fence_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "MFENCE" ].
-
-
 Inductive cmd : Type :=
 | CSkip : cmd
 | CAss : var -> aexp -> cmd
 | CSeq : cmd -> cmd -> cmd
 | CIf : bexp -> cmd -> cmd -> cmd
 | CWhile : bexp -> cmd -> cmd
-| CBar : fence -> cmd (* Barrier *)
 | CLock : lid -> cmd
 | CUnlock : lid -> cmd
-(* TODO: CAtomic?? *)
 .
 
 Hint Constructors cmd.
@@ -787,7 +762,6 @@ Tactic Notation "cmd_cases" tactic(first) ident(c) :=
   first;
   [ Case_aux c "SKIP" | Case_aux c "::=" | Case_aux c ";;"
   | Case_aux c "IFB" | Case_aux c "WHILE"
-  | Case_aux c "BAR"
   | Case_aux c "LOCK" | Case_aux c "UNLOCK"
   ].
 
@@ -801,8 +775,6 @@ Notation "'IFB' b 'THEN' c1 'ELSE' c2 'FI'" :=
   (CIf b c1 c2) (at level 80, right associativity).
 Notation "'WHILE' b 'DO' c 'END'" :=
   (CWhile b c) (at level 80, right associativity).
-Notation "'BAR' f" :=
-  (CBar f) (at level 80).
 Notation "'LOCK' l" :=
   (CLock l) (at level 80).
 Notation "'UNLOCK' l" :=
@@ -863,10 +835,7 @@ Inductive ststep : tid -> state -> state -> Prop :=
                t @ (ST (WHILE b DO c END) buf mem lks) ==>
                  (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks)
 
-| ST_Bar : forall t buf mem lks,
-             oldest buf = None ->
-             t @ (ST (BAR MFENCE) buf mem lks) ==> (ST SKIP buf mem lks)
-| ST_Flush : forall t buf mem lks x n c,
+| ST_FlushOne : forall t buf mem lks x n c,
                (* Here no matter blocked or not, it can flush anyway *)
                oldest buf = Some (x, n) ->
                t @ (ST c buf mem lks) ==> (ST c (flush buf) (update mem x n) lks)
@@ -896,8 +865,8 @@ Tactic Notation "ststep_cases" tactic(first) ident(c) :=
   | Case_aux c "ST_Seq" | Case_aux c "ST_SeqStep"
   | Case_aux c "ST_IfTrue" | Case_aux c "ST_IfFalse"
   | Case_aux c "ST_IfStep" | Case_aux c "ST_While"
-  | Case_aux c "ST_Bar" | Case_aux c "ST_Flush"
-  | Case_aux c "ST_LockDone" | Case_aux c "ST_LockStuck" | Case_aux c "ST_Unlock"
+  | Case_aux c "ST_FlushOne" | Case_aux c "ST_LockDone"
+  | Case_aux c "ST_LockStuck" | Case_aux c "ST_Unlock"
   ].
 
 
@@ -913,7 +882,7 @@ Proof with eauto.
     right.
     destruct p.
     exists (ST SKIP buf (update mem v n) lks)...
-    apply ST_Flush...
+    apply ST_FlushOne...
   Case "::=".
     right; destruct (strong_progress_a a buf mem)...
     inv H...
@@ -926,12 +895,6 @@ Proof with eauto.
     right; destruct (strong_progress_b b buf mem)...
     inv H; destruct b0...
     inv H...
-  Case "BAR".
-    destruct f; right.
-    destruct buf...
-    destruct p.
-    eexists (ST (BAR MFENCE) buf (update mem v n) lks).
-    apply ST_Flush...
   Case "LOCK".
     destruct (lks l) eqn:Hl...
     destruct (eq_tid_dec t t0); subst...
@@ -965,7 +928,7 @@ Proof with auto.
     subst...
   assert (T0 @ st ==> st2).
     subst.
-    apply ST_Flush.
+    apply ST_FlushOne.
     simpl...
   assert (st1 = st2).
     eapply Hf.
