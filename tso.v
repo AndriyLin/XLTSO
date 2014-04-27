@@ -420,9 +420,16 @@ Tactic Notation "event_cases" tactic(first) ident(c) :=
   [ Case_aux c "EV_Read" | Case_aux c "EV_Write"
   | Case_aux c "EV_Lock" | Case_aux c "EV_Unlock" ].
 
-Definition trace : Type := list event.
-(* ---------------- end of Event ---------------- *)
 
+Definition trace : Type := list (tid * event).
+
+(* TODO: I currently add event to the beginning, is that the best choice? *)
+Definition add_event (tr : trace) (t : tid) (oe : option event) : trace :=
+  match oe with
+    | Some e => (t, e) :: tr
+    | None => tr
+  end.
+(* ---------------- end of Event ---------------- *)
 
 
 (* ---------------- Arithmatic Expressions ---------------- *)
@@ -1020,7 +1027,7 @@ Proof with auto.
 Qed.
 (* ---------------- end of Command & State (uni) ---------------- *)
 
-(* TODO: Resume here *)
+
 (* ---------------- Threads & Configuration ---------------- *)
 (* Only Command and Write Buffer is thread private *)
 Definition threads := tid -> (cmd * buffer).
@@ -1043,21 +1050,24 @@ Record configuration := CFG {
   cfg_tids : set tid;
   cfg_thds : threads;
   cfg_mem : memory;
-  cfg_lks : lock_status
+  cfg_lks : lock_status;
+  cfg_evts : trace
 }.
 
 Hint Constructors configuration.
 
 Definition empty_configuration :=
-  CFG empty_tids empty_threads empty_memory empty_locks.
+  CFG empty_tids empty_threads empty_memory empty_locks nil.
 
 
 Inductive cfgvalue : configuration -> Prop :=
 (* All threads finish *)
-| CFGV_End : forall thds mem lks,
-               cfgvalue (CFG empty_tids thds mem lks)
-(* Deadlock *)
-(*| CFGV_Deadlock: TODO *)
+| CFGV_End : forall thds mem lks evts,
+               cfgvalue (CFG empty_tids thds mem lks evts)
+(* Deadlock TODO: is this definition OK? *)
+| CFGV_Deadlock: forall tids thds mem lks evts,
+                   (forall t, in_tids t tids = true -> stuck t (fst (thds t)) lks) ->
+                   cfgvalue (CFG tids thds mem lks evts)
 .
 
 Hint Constructors cfgvalue.
@@ -1066,17 +1076,18 @@ Reserved Notation "cfg1 '-->' cfg2" (at level 60).
 
 Inductive cfgstep : configuration -> configuration -> Prop :=
 (* One thread already ends its job, thus remove it *)
-| CFGS_Done : forall t tids thds mem lks,
+| CFGS_Done : forall t tids thds mem lks evts,
                 in_tids t tids = true ->
                 thds t = (SKIP, nil) ->
-                (CFG tids thds mem lks) --> (CFG (remove_tid t tids) thds mem lks)
+                (CFG tids thds mem lks evts) --> (CFG (remove_tid t tids) thds mem lks evts)
 
 (* One thread can move one step forward, in terms of "state" *)
-| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks',
+| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks' evt trace,
                in_tids t tids = true ->
                thds t = (c, b) ->
-               t @ (ST c b mem lks) ==> (ST c' b' mem' lks') ->
-               (CFG tids thds mem lks) --> (CFG tids (override thds t c' b') mem' lks')
+               t @ (ST c b mem lks) ==> (ST c' b' mem' lks') [[evt]] ->
+               (CFG tids thds mem lks trace) -->
+                 (CFG tids (override thds t c' b') mem' lks' (add_event trace t evt))
 
 where "cfg1 '-->' cfg2" := (cfgstep cfg1 cfg2).
 
@@ -1093,9 +1104,9 @@ Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configurat
     | nil => accu
     | h :: tlc =>
       match accu with
-        | CFG tids thds mem lks =>
+        | CFG tids thds mem lks trace =>
           let t := TID n in
-          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks in
+          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks trace in
           _init_cfg tlc (S n) accu'
       end
   end.
@@ -1148,25 +1159,26 @@ Definition codes : list cmd :=
 
 (* The following is to prove that the init_cfg function works as expected *)
 Example preprocess:
-  forall tids thds mem lks,
-    init_cfg codes = (CFG tids thds mem lks) ->
+  forall tids thds mem lks trace,
+    init_cfg codes = (CFG tids thds mem lks trace) ->
     size_tids tids = 2 /\ in_tids T0 tids = true /\ in_tids T1 tids = true
-    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil).
+    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil) /\ trace = nil.
 Proof.
   intros.
   unfold codes, proc0, proc1, init_cfg in *.
   inv H.
-  auto.
+  split; auto.
 Qed.
 
 (* The following is to prove that the final state is actually
 reachable by the language and semantics I defined above *)
 Theorem tso_semantics:
-  exists thds mem lks,
-    init_cfg codes -->* (CFG empty_tids thds mem lks) /\
-    cfgvalue (CFG empty_tids thds mem lks) /\ (* final state *)
+  exists thds mem lks trace,
+    init_cfg codes -->* (CFG empty_tids thds mem lks trace) /\
+    cfgvalue (CFG empty_tids thds mem lks trace) /\ (* final state *)
     mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
+  eexists.
   eexists.
   eexists.
   eexists.
@@ -1248,13 +1260,14 @@ Proof with eauto.
 
   (* DONE, now the final state is: EAX = 1 /\ EBX = 0 /\ X = 1 *)
   apply multi_refl.
+  simpl in *.
   auto.
 Qed.
 
 End TsoSemanticsProof.
 (* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
-
+(* TODO: Resume here *)
 (* ---------------- Data-Race-Free ---------------- *)
 (* the variable is just about to be written *)
 Inductive writes : cmd -> var -> Prop :=
@@ -1401,14 +1414,13 @@ Hint Constructors datarace.
 
 
 Definition data_race_free (cfg : configuration) : Prop :=
-  ~ (exists tids thds mem lks t1 t2, cfg -->* (CFG tids thds mem lks)
-                                     /\ in_tids t1 tids = true
-                                     /\ in_tids t2 tids = true
-                                     /\ t1 <> t2
-                                     /\ datarace (fst (thds t1)) (fst (thds t2))
+  ~ (exists tids thds mem lks t1 t2 trace,
+       cfg -->* (CFG tids thds mem lks trace)
+       /\ in_tids t1 tids = true
+       /\ in_tids t2 tids = true
+       /\ t1 <> t2
+       /\ datarace (fst (thds t1)) (fst (thds t2))
     ).
-
-
 
 
 (* TODO: need the lemma that "An expression e is data-race free if the
