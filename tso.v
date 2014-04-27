@@ -15,7 +15,7 @@ Contraints:
   than None.
 
 Xuankang LIN
-Updated: 04/25/2014
+Last updated: 04/26/2014
 
 
 Structure:
@@ -24,6 +24,7 @@ Structure:
 * Thread ID
 * Locks
 * Write Buffer
+* Event
 * Arithmatic Expression
 * Boolean Expression
 * Commands & State (uni-thread)
@@ -414,6 +415,27 @@ End TestWriteBuffer.
 (* ---------------- end of Write Buffer ---------------- *)
 
 
+(* ---------------- Event ---------------- *)
+(* Events records the "important" actions while moving forward using
+small-step semantics *)
+Inductive event : Type :=
+| EV_Read (x : var)
+| EV_Write (x : var) (n : nat)
+| EV_Lock (l : lid)
+| EV_Unlock (l : lid).
+
+Hint Constructors event.
+
+Tactic Notation "event_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "EV_Read" | Case_aux c "EV_Write"
+  | Case_aux c "EV_Lock" | Case_aux c "EV_Unlock" ].
+
+Definition trace : Type := list event.
+(* ---------------- end of Event ---------------- *)
+
+
+
 (* ---------------- Arithmatic Expressions ---------------- *)
 Inductive aexp : Type :=
 | ANum : nat -> aexp
@@ -437,47 +459,48 @@ Inductive avalue : aexp -> Prop :=
 
 Hint Constructors avalue.
 
-Reserved Notation "a1 '/-' b '~' m '==A>' a2" (at level 80).
+(* Note: here the "evt" represents whether this step would incur an event *)
+Reserved Notation "a1 '/-' b '~' m '==A>' a2 '[[' evt ']]'" (at level 80).
 
-Inductive astep : buffer -> memory -> aexp -> aexp -> Prop :=
+Inductive astep : buffer -> memory -> aexp -> aexp -> option event -> Prop :=
 | AS_Plus : forall b m n1 n2,
-              (APlus (ANum n1) (ANum n2)) /- b ~ m ==A> ANum (n1 + n2)
-| AS_Plus1 : forall b m a1 a1' a2,
-               a1 /- b ~ m ==A> a1' ->
-               (APlus a1 a2) /- b ~ m ==A> (APlus a1' a2)
-| AS_Plus2 : forall b m a1 a2 a2',
+              (APlus (ANum n1) (ANum n2)) /- b ~ m ==A> ANum (n1 + n2) [[None]]
+| AS_Plus1 : forall b m a1 a1' a2 evt,
+               a1 /- b ~ m ==A> a1' [[evt]] ->
+               (APlus a1 a2) /- b ~ m ==A> (APlus a1' a2) [[evt]]
+| AS_Plus2 : forall b m a1 a2 a2' evt,
                avalue a1 ->
-               a2 /- b ~ m ==A> a2' ->
-               (APlus a1 a2) /- b ~ m ==A> (APlus a1 a2')
+               a2 /- b ~ m ==A> a2' [[evt]] ->
+               (APlus a1 a2) /- b ~ m ==A> (APlus a1 a2') [[evt]]
 
 | AS_Minus : forall b m n1 n2,
-               AMinus (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 - n2)
-| AS_Minus1 : forall b m a1 a1' a2,
-                a1 /- b ~ m ==A> a1' ->
-                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1' a2)
-| AS_Minus2 : forall b m a1 a2 a2',
+               AMinus (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 - n2) [[None]]
+| AS_Minus1 : forall b m a1 a1' a2 evt,
+                a1 /- b ~ m ==A> a1' [[evt]] ->
+                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1' a2) [[evt]]
+| AS_Minus2 : forall b m a1 a2 a2' evt,
                 avalue a1 ->
-                a2 /- b ~ m ==A> a2' ->
-                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1 a2')
+                a2 /- b ~ m ==A> a2' [[evt]] ->
+                (AMinus a1 a2) /- b ~ m ==A> (AMinus a1 a2') [[evt]]
 
 | AS_Mult : forall b m n1 n2,
-              AMult (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 * n2)
-| AS_Mult1 : forall b m a1 a1' a2,
-               a1 /- b ~ m ==A> a1' ->
-               (AMult a1 a2) /- b ~ m ==A> (AMult a1' a2)
-| AS_Mult2 : forall b m a1 a2 a2',
+              AMult (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 * n2) [[None]]
+| AS_Mult1 : forall b m a1 a1' a2 evt,
+               a1 /- b ~ m ==A> a1' [[evt]] ->
+               (AMult a1 a2) /- b ~ m ==A> (AMult a1' a2) [[evt]]
+| AS_Mult2 : forall b m a1 a2 a2' evt,
                avalue a1 ->
-               a2 /- b ~ m ==A> a2' ->
-               (AMult a1 a2) /- b ~ m ==A> (AMult a1 a2')
+               a2 /- b ~ m ==A> a2' [[evt]] ->
+               (AMult a1 a2) /- b ~ m ==A> (AMult a1 a2') [[evt]]
 
 | AS_VarBuf : forall b m x n,
                 get b x = Some n ->
-                (AVar x) /- b ~ m ==A> (ANum n)
+                (AVar x) /- b ~ m ==A> (ANum n) [[Some (EV_Read x)]]
 | AS_VarMem : forall b m x,
                 get b x = None ->
-                (AVar x) /- b ~ m ==A> ANum (m x)
+                (AVar x) /- b ~ m ==A> ANum (m x) [[Some (EV_Read x)]]
 
-where "a1 '/-' b '~' m '==A>' a2" := (astep b m a1 a2).
+where "a1 '/-' b '~' m '==A>' a2 '[[' evt ']]'" := (astep b m a1 a2 evt).
 
 Hint Constructors astep.
 
@@ -489,80 +512,84 @@ Tactic Notation "astep_cases" tactic(first) ident(c) :=
   | Case_aux c "AS_VarBuf" | Case_aux c "AS_VarMem" ].
 
 Theorem strong_progress_a :
-  forall a b m, avalue a \/ (exists a', a /- b ~ m ==A> a').
+  forall a b m, avalue a \/ (exists a' evt, a /- b ~ m ==A> a' [[evt]]).
 Proof with eauto.
   intros.
   aexp_cases (induction a) Case;
     simpl...
   Case "APlus".
-    right. inv IHa1.
-    SCase "avalue a1". inv IHa2.
-      SSCase "avalue a2". inv H. inv H0...
-      SSCase "a2 ==A> a2'". inv H0...
-    SCase "a1 ==A> a1'". inv H...
+    right; destruct IHa1...
+    destruct IHa2...
+    inv H; inv H0...
+    inv H0; inv H1...
+    inv H; inv H0...
   Case "AMinus".
-    right. inv IHa1.
-    SCase "avalue a1". inv IHa2.
-      SSCase "avalue a2". inv H. inv H0...
-      SSCase "a2 ==A> a2'". inv H0...
-    SCase "a1 ==A> a1'". inv H...
+    right; destruct IHa1...
+    destruct IHa2...
+    inv H; inv H0...
+    inv H0; inv H1...
+    inv H; inv H0...
   Case "AMult".
-    right. inv IHa1.
-    SCase "avalue a1". inv IHa2.
-      SSCase "avalue a2". inv H. inv H0...
-      SSCase "a2 ==A> a2'". inv H0...
-    SCase "a1 ==A> a1'". inv H...
+    right; destruct IHa1...
+    destruct IHa2...
+    inv H; inv H0...
+    inv H0; inv H1...
+    inv H; inv H0...
   Case "AVar".
     right.
     destruct (get b v) eqn:Hb...
 Qed.
 
 
-Theorem astep_deterministic: forall b m a a1 a2,
-                               a /- b ~ m ==A> a1 ->
-                               a /- b ~ m ==A> a2 ->
-                               a1 = a2.
+Ltac find_astep_contradiction1 :=
+  match goal with
+      H1: ANum ?n /- ?b ~ ?m ==A> ?ae [[?ev]] |- _ => inversion H1
+  end.
+
+Ltac find_astep_contradiction2 :=
+  match goal with
+      H1: avalue ?a, H2: ?a /- ?b ~ ?m ==A> ?a2 [[?ev]] |- _ => inv H1; invf H2
+  end.
+
+Tactic Notation "helper_astep" tactic(t) :=
+  inv t; auto;
+  try find_astep_contradiction1;
+  try find_astep_contradiction2.
+
+Theorem astep_deterministic: forall b m a a1 a2 evt1 evt2,
+                               a /- b ~ m ==A> a1 [[evt1]] ->
+                               a /- b ~ m ==A> a2 [[evt2]] ->
+                               a1 = a2 /\ evt1 = evt2.
 Proof with auto.
   intros.
+  generalize dependent evt2.
   generalize dependent a2.
   astep_cases (induction H) Case;
     intros.
   Case "AS_Plus".
-    inv H0...
-    invf H5.
-    invf H6.
+    helper_astep H0.
   Case "AS_Plus1".
-    inv H0; try solve by inversion 1.
-    rewrite -> (IHastep a1'0)...
-    inv H5; inv H.
+    helper_astep H0.
+    destruct (IHastep a1'0 evt2); subst...
   Case "AS_Plus2".
-    inv H1; try solve by inversion 1.
-    inv H; inv H7.
-    rewrite -> (IHastep a2'0)...
+    helper_astep H1.
+    destruct (IHastep a2'0 evt2); subst...
   Case "AS_Minus".
-    inv H0...
-    invf H5.
-    invf H6.
+    helper_astep H0.
   Case "AS_Minus1".
-    inv H0; try solve by inversion 1.
-    rewrite -> (IHastep a1'0)...
-    inv H5; inv H.
+    helper_astep H0.
+    destruct (IHastep a1'0 evt2); subst...
   Case "AS_Minus2".
-    inv H1; try solve by inversion 1.
-    inv H; invf H7.
-    rewrite -> (IHastep a2'0)...
+    helper_astep H1.
+    destruct (IHastep a2'0 evt2); subst...
   Case "AS_Mult".
-    inv H0...
-    invf H5.
-    invf H6.
+    helper_astep H0.
   Case "AS_Mult1".
-    inv H0; try solve by inversion 1.
-    rewrite -> (IHastep a1'0)...
-    inv H5; invf H.
+    helper_astep H0.
+    destruct (IHastep a1'0 evt2); subst...
   Case "AS_Mult2".
-    inv H1; try solve by inversion 1.
-    inv H; invf H7.
-    rewrite -> (IHastep a2'0)...
+    helper_astep H1.
+    destruct (IHastep a2'0 evt2); subst...
   Case "AS_VarBuf".
     inv H0.
     assert (Some n = Some n0).
@@ -601,46 +628,47 @@ Inductive bvalue : bexp -> Prop :=
 
 Hint Constructors bvalue.
 
-Reserved Notation "b1 '/-' buf '~' mem '==B>' b2" (at level 80).
+(* Note: here the "evt" represents whether this step would incur an event *)
+Reserved Notation "b1 '/-' buf '~' mem '==B>' b2 '[[' evt ']]'" (at level 80).
 
-Inductive bstep : buffer -> memory -> bexp -> bexp -> Prop :=
+Inductive bstep : buffer -> memory -> bexp -> bexp -> option event -> Prop :=
 | BS_Not : forall buf mem b,
-             BNot (BBool b) /- buf ~ mem ==B> BBool (negb b)
-| BS_Not1 : forall buf mem b b',
-              b /- buf ~ mem ==B> b' ->
-              (BNot b) /- buf ~ mem ==B> BNot b'
+             BNot (BBool b) /- buf ~ mem ==B> BBool (negb b) [[None]]
+| BS_Not1 : forall buf mem b b' evt,
+              b /- buf ~ mem ==B> b' [[evt]] ->
+              (BNot b) /- buf ~ mem ==B> BNot b' [[evt]]
 
 | BS_And : forall buf mem b1 b2,
-             (BAnd (BBool b1) (BBool b2)) /- buf ~ mem ==B> BBool (andb b1 b2)
-| BS_And1 : forall buf mem be1 be1' be2,
-              be1 /- buf ~ mem ==B> be1' ->
-              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1' be2
-| BS_And2 : forall buf mem be1 be2 be2',
+             (BAnd (BBool b1) (BBool b2)) /- buf ~ mem ==B> BBool (andb b1 b2) [[None]]
+| BS_And1 : forall buf mem be1 be1' be2 evt,
+              be1 /- buf ~ mem ==B> be1' [[evt]] ->
+              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1' be2 [[evt]]
+| BS_And2 : forall buf mem be1 be2 be2' evt,
               bvalue be1 ->
-              be2 /- buf ~ mem ==B> be2' ->
-              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1 be2'
+              be2 /- buf ~ mem ==B> be2' [[evt]] ->
+              (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1 be2' [[evt]]
 
 | BS_Eq : forall buf mem n1 n2,
-            (BEq (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (beq_nat n1 n2)
-| BS_Eq1 : forall buf mem a1 a1' a2,
-             a1 /- buf ~ mem ==A> a1' ->
-             (BEq a1 a2) /- buf ~ mem ==B> BEq a1' a2
-| BS_Eq2 : forall buf mem a1 a2 a2',
+            (BEq (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (beq_nat n1 n2) [[None]]
+| BS_Eq1 : forall buf mem a1 a1' a2 evt,
+             a1 /- buf ~ mem ==A> a1' [[evt]] ->
+             (BEq a1 a2) /- buf ~ mem ==B> BEq a1' a2 [[evt]]
+| BS_Eq2 : forall buf mem a1 a2 a2' evt,
              avalue a1 ->
-             a2 /- buf ~ mem ==A> a2' ->
-             (BEq a1 a2) /- buf ~ mem ==B> BEq a1 a2'
+             a2 /- buf ~ mem ==A> a2' [[evt]] ->
+             (BEq a1 a2) /- buf ~ mem ==B> BEq a1 a2' [[evt]]
 
 | BS_Le : forall buf mem n1 n2,
-            (BLe (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (ble_nat n1 n2)
-| BS_Le1 : forall buf mem a1 a1' a2,
-             a1 /- buf ~ mem ==A> a1' ->
-             (BLe a1 a2) /- buf ~ mem ==B> BLe a1' a2
-| BS_Le2 : forall buf mem a1 a2 a2',
+            (BLe (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (ble_nat n1 n2) [[None]]
+| BS_Le1 : forall buf mem a1 a1' a2 evt,
+             a1 /- buf ~ mem ==A> a1' [[evt]] ->
+             (BLe a1 a2) /- buf ~ mem ==B> BLe a1' a2 [[evt]]
+| BS_Le2 : forall buf mem a1 a2 a2' evt,
              avalue a1 ->
-             a2 /- buf ~ mem ==A> a2' ->
-             (BLe a1 a2) /- buf ~ mem ==B> BLe a1 a2'
+             a2 /- buf ~ mem ==A> a2' [[evt]] ->
+             (BLe a1 a2) /- buf ~ mem ==B> BLe a1 a2' [[evt]]
 
-where "b1 '/-' buf '~' mem '==B>' b2" := (bstep buf mem b1 b2).
+where "b1 '/-' buf '~' mem '==B>' b2 '[[' evt ']]'" := (bstep buf mem b1 b2 evt).
 
 Hint Constructors bstep.
 
@@ -652,20 +680,21 @@ Tactic Notation "bstep_cases" tactic(first) ident(c) :=
   | Case_aux c "BS_Le" | Case_aux c "BS_Le1" | Case_aux c "BS_Le2" ].
 
 Theorem strong_progress_b :
-  forall b buf mem, bvalue b \/ (exists b', b /- buf ~ mem ==B> b').
+  forall b buf mem, bvalue b \/ (exists b' evt, b /- buf ~ mem ==B> b' [[evt]]).
 Proof with eauto.
   intros.
   bexp_cases (induction b) Case;
     simpl...
   Case "BNot".
-    right. inv IHb.
+    right; destruct IHb.
     inv H...
-    inv H...
-  Case "BAnd".
-    right. inv IHb1; inv IHb2...
     inv H; inv H0...
-    inv H0...
-    inv H...
+  Case "BAnd".
+    right; destruct IHb1.
+    destruct IHb2.
+    inv H; inv H0...
+    inv H0; inv H...
+    inv H1...
     inv H; inv H0...
   Case "BEq".
     right; rename a into a1; rename a0 into a2.
@@ -673,79 +702,88 @@ Proof with eauto.
     SCase "avalue a1".
       destruct (strong_progress_a a2 buf mem).
       inv H; inv H0...
-      inv H0...
+      inv H0; inv H1...
     SCase "a1 ==A> a1'".
-      inv H...
+      inv H; inv H0...
   Case "BLe".
     right; rename a into a1; rename a0 into a2.
     destruct (strong_progress_a a1 buf mem).
     SCase "avalue a1".
       destruct (strong_progress_a a2 buf mem).
       inv H; inv H0...
-      inv H0...
+      inv H0; inv H1...
     SCase "a1 ==A> a1'".
-      inv H...
+      inv H; inv H0...
 Qed.
 
 
+Ltac find_bstep_contradiction1 :=
+  match goal with
+      H1: BBool ?n /- ?b ~ ?m ==B> ?be [[?ev]] |- _ => inversion H1
+  end.
+
+Ltac find_bstep_contradiction2 :=
+  match goal with
+      H1: bvalue ?b, H2: ?b /- ?buf ~ ?mem ==B> ?b2 [[?ev]] |- _ => inv H1; invf H2
+  end.
+
+Tactic Notation "helper_bstep" tactic(t) :=
+  inv t; auto;
+  try find_astep_contradiction1;
+  try find_astep_contradiction2;
+  try find_bstep_contradiction1;
+  try find_bstep_contradiction2.
+
 Theorem bstep_deterministic:
-  forall buf mem b b1 b2,
-    b /- buf ~ mem ==B> b1 ->
-    b /- buf ~ mem ==B> b2 ->
-    b1 = b2.
+  forall buf mem b b1 b2 evt1 evt2,
+    b /- buf ~ mem ==B> b1 [[evt1]] ->
+    b /- buf ~ mem ==B> b2 [[evt2]] ->
+    b1 = b2 /\ evt1 = evt2.
 Proof with auto.
   intros.
+  generalize dependent evt2.
   generalize dependent b2.
   bstep_cases (induction H) Case;
     intros.
   Case "BS_Not".
-    inv H0...
-    invf H3.
+    helper_bstep H0.
   Case "BS_Not1".
-    inv H0...
-    invf H.
-    rewrite -> (IHbstep b'0)...
+    helper_bstep H0.
+    destruct (IHbstep b'0 evt2); subst...
   Case "BS_And".
-    inv H0; try solve by inversion 1...
+    helper_bstep H0.
   Case "BS_And1".
-    inv H0; try solve by inversion 1...
-    rewrite -> (IHbstep be1'0)...
-    inv H5; invf H.
+    helper_bstep H0.
+    destruct (IHbstep be1'0 evt2); subst...
   Case "BS_And2".
-    inv H1; try solve by inversion 1...
-    inv H; invf H7.
-    rewrite -> (IHbstep be2'0)...
+    helper_bstep H1.
+    destruct (IHbstep be2'0 evt2); subst...
   Case "BS_Eq".
-    inv H0; try solve by inversion 1...
+    helper_bstep H0.
   Case "BS_Eq1".
-    inv H0; try solve by inversion 1...
-    assert (a1' = a1'0) by eauto.
-    subst...
-    inv H5; invf H.
+    helper_bstep H0.
+    assert (a1' = a1'0 /\ evt = evt2) by eauto.
+    inv H0...
   Case "BS_Eq2".
+    helper_bstep H1.
+    assert (a2' = a2'0 /\ evt = evt2) by eauto.
     inv H1...
-    invf H0.
-    inv H; invf H7.
-    assert (a2' = a2'0) by eauto.
-    subst...
   Case "BS_Le".
-    inv H0; try solve by inversion 1...
+    helper_bstep H0.
   Case "BS_Le1".
-    inv H0; try solve by inversion 1...
-    assert (a1' = a1'0) by eauto.
-    subst...
-    inv H5; invf H.
+    helper_bstep H0.
+    assert (a1' = a1'0 /\ evt = evt2) by eauto.
+    inv H0...
   Case "BS_Le2".
-    inv H1; try solve by inversion 1...
-    inv H; invf H7.
-    assert (a2' = a2'0) by eauto.
-    subst...
+    helper_bstep H1.
+    assert (a2' = a2'0 /\ evt = evt2) by eauto.
+    inv H1...
 Qed.
 
 Hint Resolve bstep_deterministic.
 (* ---------------- end of Boolean Expressions ---------------- *)
 
-
+(* TODO: Resume here, add event to command's semantics *)
 (* ---------------- Command & State (uni) ---------------- *)
 Inductive cmd : Type :=
 | CSkip : cmd
@@ -1353,11 +1391,6 @@ Definition data_race_free (cfg : configuration) : Prop :=
 
 
 
-Inductive event : Type :=
-| ERead (x : var)
-| EWrite (x : var) (n : nat)
-| ELock (l : lid)
-| EUnlock (l : lid).
 
 (* TODO: need the lemma that "An expression e is data-race free if the
 initial configuration (empty, empty, e) is data-race free"? *)
