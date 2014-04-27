@@ -302,15 +302,9 @@ Definition lock (st : lock_status) (t : tid) (l : lid) : lock_status :=
 
 Hint Unfold lock.
 
-(* For simplicity (without checking program correctness), it won't
-crush even if t doesn't hold the lock. *)
+(* Checking of validity is left to semantics, not done here *)
 Definition unlock (st : lock_status) (t : tid) (l : lid) : lock_status :=
-  match st l with
-    | Some t' => if eq_tid_dec t t'
-                 then fun l' => if eq_lid_dec l l' then None else st l'
-                 else st (* bad attempt *)
-    | None => st (* bad attempt *)
-  end.
+  fun l' => if eq_lid_dec l l' then None else st l'.
 
 Hint Unfold unlock.
 
@@ -329,11 +323,6 @@ Theorem test_unlock_correctness:
 Proof with auto.
   intros.
   unfold unlock...
-  destruct (st l) eqn:Hl...
-  destruct (eq_tid_dec t t0)...
-  inv H.
-  assert (t = t) by auto.
-  apply n in H; inv H.
 Qed.
 
 End TestLocks.
@@ -783,7 +772,7 @@ Qed.
 Hint Resolve bstep_deterministic.
 (* ---------------- end of Boolean Expressions ---------------- *)
 
-(* TODO: Resume here, add event to command's semantics *)
+
 (* ---------------- Command & State (uni) ---------------- *)
 Inductive cmd : Type :=
 | CSkip : cmd
@@ -853,55 +842,68 @@ Inductive stvalue : tid -> state -> Prop :=
 
 Hint Constructors stvalue.
 
-Reserved Notation "t '@' st1 '==>' st2" (at level 80).
+(* Note: evt is the event incurred by this step of evaluation *)
+Reserved Notation "t '@' st1 '==>' st2 '[[' evt ']]'" (at level 80).
 
-Inductive ststep : tid -> state -> state -> Prop :=
+Inductive ststep : tid -> state -> state -> option event -> Prop :=
 | ST_Ass : forall t x n buf mem lks,
              t @ (ST (x ::= ANum n) buf mem lks) ==>
-               (ST SKIP (write buf x n) mem lks)
-| ST_AssStep : forall t x a a' buf mem lks,
-                 a /- buf ~ mem ==A> a' ->
-                 t @ (ST (x ::= a) buf mem lks) ==> (ST (x ::= a') buf mem lks)
+               (ST SKIP (write buf x n) mem lks) [[Some (EV_Write x n)]]
+| ST_AssStep : forall t x a a' buf mem lks evt,
+                 a /- buf ~ mem ==A> a' [[evt]] ->
+                 t @ (ST (x ::= a) buf mem lks) ==> (ST (x ::= a') buf mem lks) [[evt]]
 
 | ST_Seq : forall t c2 buf mem lks,
-             t @ (ST (SKIP ;; c2) buf mem lks) ==> (ST c2 buf mem lks)
-| ST_SeqStep : forall t c1 c1' c2 buf mem lks buf' mem' lks',
-                 t @ (ST c1 buf mem lks) ==> (ST c1' buf' mem' lks') ->
-                 t @ (ST (c1 ;; c2) buf mem lks) ==> (ST (c1' ;; c2) buf' mem' lks')
+             t @ (ST (SKIP ;; c2) buf mem lks) ==> (ST c2 buf mem lks) [[None]]
+| ST_SeqStep : forall t c1 c1' c2 buf mem lks buf' mem' lks' evt,
+                 t @ (ST c1 buf mem lks) ==> (ST c1' buf' mem' lks') [[evt]] ->
+                 t @ (ST (c1 ;; c2) buf mem lks) ==> (ST (c1' ;; c2) buf' mem' lks') [[evt]]
 
 | ST_IfTrue : forall t c1 c2 buf mem lks,
                 t @ (ST (IFB (BBool true) THEN c1 ELSE c2 FI) buf mem lks) ==>
-                  (ST c1 buf mem lks)
+                  (ST c1 buf mem lks) [[None]]
 | ST_IfFalse : forall t c1 c2 buf mem lks,
                  t @ (ST (IFB (BBool false) THEN c1 ELSE c2 FI) buf mem lks) ==>
-                   (ST c2 buf mem lks)
-| ST_IfStep : forall t c1 c2 be be' buf mem lks,
-                be /- buf ~ mem ==B> be' ->
+                   (ST c2 buf mem lks) [[None]]
+| ST_IfStep : forall t c1 c2 be be' buf mem lks evt,
+                be /- buf ~ mem ==B> be' [[evt]] ->
                 t @ (ST (IFB be THEN c1 ELSE c2 FI) buf mem lks) ==>
-                  (ST (IFB be' THEN c1 ELSE c2 FI) buf mem lks)
+                  (ST (IFB be' THEN c1 ELSE c2 FI) buf mem lks) [[evt]]
 
 | ST_While : forall t b c buf mem lks,
                t @ (ST (WHILE b DO c END) buf mem lks) ==>
-                 (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks)
+                 (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks) [[None]]
 
 | ST_FlushOne : forall t buf mem lks x n c,
                   (* Here it's defined as "it can flush no matter blocked or not" *)
                   oldest buf = Some (x, n) ->
                   t @ (ST c buf mem lks) ==> (ST c (flushone buf) (update mem x n) lks)
+                    [[None]]
 
-(* to LOCK/UNLOCK, buffer must be empty *)
+(* to LOCK, buffer must be empty *)
 | ST_Lock : forall t mem lks lk,
-              lks lk = None \/ lks lk = Some t ->
+              lks lk = None ->
               t @ (ST (LOCK lk) nil mem lks) ==>
-                (ST SKIP nil mem (lock lks t lk))
-| ST_Unlock : forall t mem lks lk,
-                (* For simplicity, I don't check the validity of this action, it won't
-                   change the state anyway if t doesn't hold the lock *)
-                (* lks lk = Some t -> *)
-                t @ (ST (UNLOCK lk) nil mem lks) ==>
-                  (ST SKIP nil mem (unlock lks t lk))
+                (ST SKIP nil mem (lock lks t lk)) [[Some (EV_Lock lk)]]
+| ST_LockAgain : forall t mem lks lk,
+                   lks lk = Some t ->
+                   t @ (ST (LOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
 
-where "t1 '@' st1 '==>' st2" := (ststep t1 st1 st2).
+(* to UNLOCK, buffer must be empty *)
+| ST_Unlock : forall t mem lks lk,
+                lks lk = Some t ->
+                t @ (ST (UNLOCK lk) nil mem lks) ==>
+                  (ST SKIP nil mem (unlock lks t lk)) [[Some (EV_Unlock lk)]]
+| ST_UnlockNil : forall t mem lks lk,
+                   lks lk = None ->
+                   t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
+| ST_UnlockOthers : forall t t' mem lks lk,
+                      lks lk = Some t' ->
+                      t <> t' ->
+                      t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
+
+
+where "t1 '@' st1 '==>' st2 '[[' evt ']]'" := (ststep t1 st1 st2 evt).
 
 Hint Constructors ststep.
 
@@ -911,14 +913,15 @@ Tactic Notation "ststep_cases" tactic(first) ident(c) :=
   | Case_aux c "ST_Seq" | Case_aux c "ST_SeqStep"
   | Case_aux c "ST_IfTrue" | Case_aux c "ST_IfFalse"
   | Case_aux c "ST_IfStep" | Case_aux c "ST_While"
-  | Case_aux c "ST_FlushOne"
-  | Case_aux c "ST_Lock" | Case_aux c "ST_Unlock"
+  | Case_aux c "ST_FlushOne" | Case_aux c "ST_Lock"
+  | Case_aux c "ST_LockAgain" | Case_aux c "ST_Unlock"
+  | Case_aux c "ST_UnlockNil" | Case_aux c "ST_UnlockOthers"
   ].
 
 
 Theorem strong_progress_st :
   forall c buf mem lks t,
-    stvalue t (ST c buf mem lks) \/ (exists st', t @ (ST c buf mem lks) ==> st').
+    stvalue t (ST c buf mem lks) \/ (exists st' evt, t @ (ST c buf mem lks) ==> st' [[evt]]).
 Proof with eauto.
   intros c.
   cmd_cases (induction c) Case;
@@ -927,21 +930,21 @@ Proof with eauto.
     destruct buf...
     right.
     destruct p.
-    exists (ST SKIP buf (update mem v n) lks)...
+    exists (ST SKIP buf (update mem v n) lks); exists None...
     apply ST_FlushOne...
   Case "::=".
     right; destruct (strong_progress_a a buf mem)...
     inv H...
-    inv H...
+    inv H; inv H0...
   Case ";;".
     destruct (IHc1 buf mem lks t).
     inv H...
-    right; inv H...
+    right; inv H; inv H0...
     destruct x...
   Case "IFB".
     right; destruct (strong_progress_b b buf mem)...
     inv H; destruct b0...
-    inv H...
+    inv H; inv H0...
   Case "LOCK".
     destruct buf.
     SCase "empty buffer".
@@ -950,34 +953,48 @@ Proof with eauto.
       right...
     SCase "non-empty buffer".
       right; destruct p.
-      eexists.
+      eexists; eexists.
       apply ST_FlushOne.
       simpl...
   Case "UNLOCK".
     destruct buf...
-    right; destruct p.
-    eexists.
-    apply ST_FlushOne...
-    simpl...
+    SCase "empty buffer".
+      right; destruct (lks l) eqn:Hl...
+      destruct (eq_tid_dec t t0); subst...
+    SCase "non-empty buffer".
+      right; destruct p.
+      eexists; eexists.
+      apply ST_FlushOne...
+      simpl...
 Qed.
 
 
 (* When a thread get stuck, it can resume when that lock is released *)
 Theorem thread_stuck_resume:
-  forall t l mem lks lks',
-    stvalue t (ST (LOCK l) nil mem lks) ->
+  forall t l buf mem lks lks',
+    stvalue t (ST (LOCK l) buf mem lks) ->
     lks' l = None \/ lks' l = Some t ->
-    exists st', t @ (ST (LOCK l) nil mem lks') ==> st'.
-Proof. eauto. Qed.
+    exists st' evt, t @ (ST (LOCK l) buf mem lks') ==> st' [[evt]].
+Proof.
+  intros.
+  inv H.
+  inv H0.
+  Case "no one holding the lock".
+    eexists; eexists.
+    apply ST_Lock; assumption.
+  Case "self holding the lock".
+    eexists; eexists.
+    apply ST_LockAgain; assumption.
+Qed.
 
 
 (* ststep is no longer deterministic, one state may execute one
 command, it may also flush one unit of its write buffer to memory *)
 Theorem ststep_not_deterministic:
-  ~ (forall t st st1 st2,
-       t @ st ==> st1 ->
-       t @ st ==> st2 ->
-       st1 = st2).
+  ~ (forall t st st1 st2 evt1 evt2,
+       t @ st ==> st1 [[evt1]] ->
+       t @ st ==> st2 [[evt2]] ->
+       st1 = st2 /\ evt1 = evt2).
 Proof with auto.
   intros Hf.
   remember (SKIP ;; SKIP) as c.
@@ -985,23 +1002,25 @@ Proof with auto.
   remember (ST c buf empty_memory empty_locks) as st.
   remember (ST SKIP buf empty_memory empty_locks) as st1.
   remember (ST c nil (update empty_memory X 100) empty_locks) as st2.
-  assert (T0 @ st ==> st1).
+  remember (None : option event) as evt1.
+  remember (None : option event) as evt2.
+  assert (T0 @ st ==> st1 [[evt1]]).
     subst...
-  assert (T0 @ st ==> st2).
+  assert (T0 @ st ==> st2 [[evt2]]).
     subst.
     apply ST_FlushOne.
     simpl...
   assert (st1 = st2).
     eapply Hf.
     apply H.
-    assumption.
+    apply H0.
   subst.
   clear H H0.
   inv H1.
 Qed.
 (* ---------------- end of Command & State (uni) ---------------- *)
 
-
+(* TODO: Resume here *)
 (* ---------------- Threads & Configuration ---------------- *)
 (* Only Command and Write Buffer is thread private *)
 Definition threads := tid -> (cmd * buffer).
