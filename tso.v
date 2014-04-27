@@ -827,14 +827,15 @@ Record state := ST {
 Hint Constructors state.
 
 
-Inductive stuck : tid -> cmd -> lock_status -> Prop :=
-| StuckLock : forall t t' lks l,
+Inductive stuck : tid -> state -> Prop :=
+| StuckLock : forall t t' lks l mem,
                 lks l = Some t' ->
                 t <> t' ->
-                stuck t (LOCK l) lks
-| StuckSeq : forall t lks c1 c2,
-               stuck t c1 lks ->
-               stuck t (c1 ;; c2) lks.
+                stuck t (ST (LOCK l) nil mem lks)
+| StuckSeq : forall t buf mem lks c1 c2,
+               stuck t (ST c1 buf mem lks) ->
+               stuck t (ST (c1 ;; c2) buf mem lks)
+.
 
 Hint Constructors stuck.
 
@@ -842,9 +843,9 @@ Hint Constructors stuck.
 Inductive stvalue : tid -> state -> Prop :=
 | STV_End : forall t mem lks,
               stvalue t (ST SKIP nil mem lks)
-| STV_Stuck : forall t c lks mem,
-                stuck t c lks ->
-                stvalue t (ST c nil mem lks)
+| STV_Stuck : forall t st,
+                stuck t st ->
+                stvalue t st
 .
 
 Hint Constructors stvalue.
@@ -985,6 +986,7 @@ Theorem thread_stuck_resume:
 Proof.
   intros.
   inv H.
+  inv H1.
   inv H0.
   Case "no one holding the lock".
     eexists; eexists.
@@ -1066,7 +1068,9 @@ Inductive cfgvalue : configuration -> Prop :=
                cfgvalue (CFG empty_tids thds mem lks evts)
 (* Deadlock TODO: is this definition OK? *)
 | CFGV_Deadlock: forall tids thds mem lks evts,
-                   (forall t, in_tids t tids = true -> stuck t (fst (thds t)) lks) ->
+                   (forall t c b, in_tids t tids = true ->
+                                  thds t = (c, b) ->
+                                  stuck t (ST c b mem lks)) ->
                    cfgvalue (CFG tids thds mem lks evts)
 .
 
@@ -1269,6 +1273,25 @@ End TsoSemanticsProof.
 
 (* TODO: Resume here *)
 (* ---------------- Data-Race-Free ---------------- *)
+Inductive writes : cmd -> var -> Prop :=
+| Writes : forall t c buf mem lks x n,
+             (exists st', t @ (ST c buf mem lks) ==> st' [[Some (EV_Write x n)]]) ->
+             writes c x
+.
+
+Hint Constructors writes.
+
+Inductive reads : cmd -> var -> Prop :=
+| Reads : forall t c buf mem lks x,
+            (exists st', t @ (ST c buf mem lks) ==> st' [[Some (EV_Read x)]]) ->
+            reads c x
+.
+
+Hint Constructors reads.
+
+
+(* TODO: use which definition??
+
 (* the variable is just about to be written *)
 Inductive writes : cmd -> var -> Prop :=
 | WritesInAss : forall x ae,
@@ -1393,6 +1416,8 @@ Tactic Notation "reads_cases" tactic(first) ident(c) :=
   | Case_aux c "ReadsInIf"
   | Case_aux c "ReadsInSeq" ].
 
+*)
+
 
 Definition uses (c : cmd) (x : var) : Prop :=
   writes c x \/ reads c x.
@@ -1428,6 +1453,11 @@ initial configuration (empty, empty, e) is data-race free"? *)
 
 
 (* ---------------- end of Data-Race-Free ---------------- *)
+
+
+(* ---------------- Sequential Consistency Semantics ---------------- *)
+
+(* ---------------- end of Sequential Consistency Semantics ---------------- *)
 
 
 (* Doubts: Do I need to use events to abstract? Yes, I may define
