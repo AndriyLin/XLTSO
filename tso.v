@@ -357,10 +357,10 @@ Definition oldest (b : buffer) : option (var * nat) :=
 Hint Unfold oldest.
 
 (* remove the oldest one in the buffer *)
-Definition flush (b : buffer) : buffer :=
+Definition flushone (b : buffer) : buffer :=
   tl b.
 
-Hint Unfold flush.
+Hint Unfold flushone.
 
 
 (* Get the latest value of some variable in the buffer, if any.
@@ -793,14 +793,24 @@ Record state := ST {
 Hint Constructors state.
 
 
+Inductive stuck : tid -> cmd -> lock_status -> Prop :=
+| StuckLock : forall t t' lks l,
+                lks l = Some t' ->
+                t <> t' ->
+                stuck t (LOCK l) lks
+| StuckSeq : forall t lks c1 c2,
+               stuck t c1 lks ->
+               stuck t (c1 ;; c2) lks.
+
+Hint Constructors stuck.
+
 (* Although using word "value", it actually means unable to move forward *)
 Inductive stvalue : tid -> state -> Prop :=
 | STV_End : forall t mem lks,
               stvalue t (ST SKIP nil mem lks)
-| STV_Stuck : forall t t' l buf mem lks,
-                lks l = Some t' ->
-                t <> t' ->
-                stvalue t (ST (LOCK l) buf mem lks)
+| STV_Stuck : forall t c lks mem,
+                stuck t c lks ->
+                stvalue t (ST c nil mem lks)
 .
 
 Hint Constructors stvalue.
@@ -837,24 +847,21 @@ Inductive ststep : tid -> state -> state -> Prop :=
                  (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks)
 
 | ST_FlushOne : forall t buf mem lks x n c,
-               (* Here no matter blocked or not, it can flush anyway *)
-               oldest buf = Some (x, n) ->
-               t @ (ST c buf mem lks) ==> (ST c (flush buf) (update mem x n) lks)
+                  (* Here it's defined as "it can flush no matter blocked or not" *)
+                  oldest buf = Some (x, n) ->
+                  t @ (ST c buf mem lks) ==> (ST c (flushone buf) (update mem x n) lks)
 
-| ST_LockDone : forall t buf mem lks lk,
-                  lks lk = None \/ lks lk = Some t ->
-                  t @ (ST (LOCK lk) buf mem lks) ==>
-                    (ST SKIP buf mem (lock lks t lk))
-| ST_LockStuck : forall t t' buf mem lks lk,
-                   lks lk = Some t' ->
-                   t <> t' ->
-                   t @ (ST (LOCK lk) buf mem lks) ==> (ST (LOCK lk) buf mem lks)
-| ST_Unlock : forall t buf mem lks lk,
+(* to LOCK/UNLOCK, buffer must be empty *)
+| ST_Lock : forall t mem lks lk,
+              lks lk = None \/ lks lk = Some t ->
+              t @ (ST (LOCK lk) nil mem lks) ==>
+                (ST SKIP nil mem (lock lks t lk))
+| ST_Unlock : forall t mem lks lk,
                 (* For simplicity, I don't check the validity of this action, it won't
                    change the state anyway if t doesn't hold the lock *)
                 (* lks lk = Some t -> *)
-                t @ (ST (UNLOCK lk) buf mem lks) ==>
-                  (ST SKIP buf mem (unlock lks t lk))
+                t @ (ST (UNLOCK lk) nil mem lks) ==>
+                  (ST SKIP nil mem (unlock lks t lk))
 
 where "t1 '@' st1 '==>' st2" := (ststep t1 st1 st2).
 
@@ -866,8 +873,8 @@ Tactic Notation "ststep_cases" tactic(first) ident(c) :=
   | Case_aux c "ST_Seq" | Case_aux c "ST_SeqStep"
   | Case_aux c "ST_IfTrue" | Case_aux c "ST_IfFalse"
   | Case_aux c "ST_IfStep" | Case_aux c "ST_While"
-  | Case_aux c "ST_FlushOne" | Case_aux c "ST_LockDone"
-  | Case_aux c "ST_LockStuck" | Case_aux c "ST_Unlock"
+  | Case_aux c "ST_FlushOne"
+  | Case_aux c "ST_Lock" | Case_aux c "ST_Unlock"
   ].
 
 
@@ -889,25 +896,40 @@ Proof with eauto.
     inv H...
     inv H...
   Case ";;".
-    right; destruct (IHc1 buf mem lks t).
+    destruct (IHc1 buf mem lks t).
     inv H...
-    inv H; destruct x...
+    right; inv H...
+    destruct x...
   Case "IFB".
     right; destruct (strong_progress_b b buf mem)...
     inv H; destruct b0...
     inv H...
   Case "LOCK".
-    destruct (lks l) eqn:Hl...
-    destruct (eq_tid_dec t t0); subst...
+    destruct buf.
+    SCase "empty buffer".
+      destruct (lks l) eqn:Hl.
+      destruct (eq_tid_dec t t0); subst...
+      right...
+    SCase "non-empty buffer".
+      right; destruct p.
+      eexists.
+      apply ST_FlushOne.
+      simpl...
+  Case "UNLOCK".
+    destruct buf...
+    right; destruct p.
+    eexists.
+    apply ST_FlushOne...
+    simpl...
 Qed.
 
 
 (* When a thread get stuck, it can resume when that lock is released *)
 Theorem thread_stuck_resume:
-  forall t l buf mem lks lks',
-    stvalue t (ST (LOCK l) buf mem lks) ->
+  forall t l mem lks lks',
+    stvalue t (ST (LOCK l) nil mem lks) ->
     lks' l = None \/ lks' l = Some t ->
-    exists st', t @ (ST (LOCK l) buf mem lks') ==> st'.
+    exists st', t @ (ST (LOCK l) nil mem lks') ==> st'.
 Proof. eauto. Qed.
 
 
@@ -1328,6 +1350,14 @@ Definition data_race_free (cfg : configuration) : Prop :=
                                      /\ t1 <> t2
                                      /\ datarace (fst (thds t1)) (fst (thds t2))
     ).
+
+
+
+Inductive event : Type :=
+| ERead (x : var)
+| EWrite (x : var) (n : nat)
+| ELock (l : lid)
+| EUnlock (l : lid).
 
 (* TODO: need the lemma that "An expression e is data-race free if the
 initial configuration (empty, empty, e) is data-race free"? *)
