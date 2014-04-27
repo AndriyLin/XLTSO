@@ -1320,7 +1320,18 @@ Inductive datarace : cmd -> cmd -> Prop :=
 
 Hint Constructors datarace.
 
-(* TODO: Define Data-Race-Free *)
+
+Definition data_race_free (cfg : configuration) : Prop :=
+  ~ (exists tids thds mem lks t1 t2, cfg -->* (CFG tids thds mem lks)
+                                     /\ in_tids t1 tids = true
+                                     /\ in_tids t2 tids = true
+                                     /\ t1 <> t2
+                                     /\ datarace (fst (thds t1)) (fst (thds t2))
+    ).
+
+(* TODO: need the lemma that "An expression e is data-race free if the
+initial configuration (empty, empty, e) is data-race free"? *)
+
 
 (* ---------------- end of Data-Race-Free ---------------- *)
 
