@@ -336,11 +336,8 @@ End TestLocks.
 Definition buffer : Type := list (var * nat).
 
 (* Add a new write to the end of buffer *)
-Fixpoint write (b : buffer) (x : var) (n : nat) : buffer :=
-  match b with
-    | nil => [(x, n)]
-    | h :: t => h :: write t x n
-  end.
+Definition write (b : buffer) (x : var) (n : nat) : buffer :=
+  append b (x, n).
 
 (* get the oldest write in the buffer *)
 Definition oldest (b : buffer) : option (var * nat) :=
@@ -398,6 +395,7 @@ Proof with auto.
   Case "b = nil".
     rewrite -> eq_var...
   Case "b = h :: t".
+    unfold write in IHt.
     rewrite -> IHt.
     destruct h...
 Qed.
@@ -428,7 +426,7 @@ Definition trace : Type := list (tid * event).
 (* TODO: I currently add event to the beginning, is that the best choice? *)
 Definition add_event (tr : trace) (t : tid) (oe : option event) : trace :=
   match oe with
-    | Some e => (t, e) :: tr
+    | Some e => append tr (t, e)
     | None => tr
   end.
 (* ---------------- end of Event ---------------- *)
@@ -1666,14 +1664,14 @@ Notation "cfg1 '--SC>*' cfg2" := (multicfgsc cfg1 cfg2) (at level 40).
 (* This section is to prove that "data race free programs have SC semantics" *)
 
 (* TODO: do this in Prop ? *)
-Fixpoint __flushall (b : buffer) (m : memory) : memory :=
+Fixpoint _flushall (b : buffer) (m : memory) : memory :=
 (* if using oldest & flushone function, coq cannot infer which variable is decreasing *)
   match b with
     | nil => m
-    | (x, v) :: t => __flushall t (update m x v)
+    | (x, v) :: t => _flushall t (update m x v)
   end.
 
-(* TODO: is this necessary? cfgvalue requires buffer to be empty *)
+(* TODO: is this necessary? cfg_normal_form requires buffer to be empty *)
 Fixpoint flushall (cfg : configuration) : configuration :=
   admit.
 
@@ -1682,9 +1680,13 @@ Theorem drf_property :
   forall cfg cfg_sc,
     data_race_free cfg ->
     cfg --SC>* cfg_sc ->
-    cfgvalue cfg_sc ->
-    exists cfg_tso, cfg -->* cfg_tso /\ cfgvalue cfg_tso.
-Proof.
+    cfg_normal_form cfg_sc ->
+    exists cfg_tso, cfg -->* cfg_tso /\ cfg_normal_form cfg_tso.
+Proof with eauto.
+  intros cfg cfgsc Hdrf Hsc Hnfsc.
+  destruct cfg as [tids thds mem lks trc].
+
+(* TODO *)
 Qed.
 
 (* TODO: Resume here *)
