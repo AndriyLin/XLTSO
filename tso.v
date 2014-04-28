@@ -32,7 +32,7 @@ Structure:
 * Proof of TSO Semantics
 * Data-Race-Free
 * Sequential Consistency Semantics
-* Ultimate Theorem
+* DRF Property
 * TODO.. More?
 *)
 
@@ -1273,7 +1273,7 @@ Qed.
 End TsoSemanticsProof.
 (* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
-(* TODO: Resume here *)
+
 (* ---------------- Data-Race-Free ---------------- *)
 Inductive writes : cmd -> var -> Prop :=
 | Writes : forall t c buf mem lks x n,
@@ -1662,9 +1662,33 @@ Notation "cfg1 '--SC>*' cfg2" := (multicfgsc cfg1 cfg2) (at level 40).
 (* ---------------- end of Sequential Consistency Semantics ---------------- *)
 
 
-(* ---------------- Ultimate Theorem ---------------- *)
+(* ---------------- DRF Property ---------------- *)
+(* This section is to prove that "data race free programs have SC semantics" *)
+
+(* TODO: do this in Prop ? *)
+Fixpoint __flushall (b : buffer) (m : memory) : memory :=
+(* if using oldest & flushone function, coq cannot infer which variable is decreasing *)
+  match b with
+    | nil => m
+    | (x, v) :: t => __flushall t (update m x v)
+  end.
+
+(* TODO: is this necessary? cfgvalue requires buffer to be empty *)
+Fixpoint flushall (cfg : configuration) : configuration :=
+  admit.
+
+
+Theorem drf_property :
+  forall cfg cfg_sc,
+    data_race_free cfg ->
+    cfg --SC>* cfg_sc ->
+    cfgvalue cfg_sc ->
+    exists cfg_tso, cfg -->* cfg_tso /\ cfgvalue cfg_tso.
+Proof.
+Qed.
+
 (* TODO: Resume here *)
-(* ---------------- end of Ultimate Theorem ---------------- *)
+(* ---------------- end of DRF Property ---------------- *)
 
 
 (* Doubts: Do I need to use events to abstract? Yes, I may define
