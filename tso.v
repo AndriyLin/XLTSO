@@ -829,28 +829,27 @@ Record state := ST {
 Hint Constructors state.
 
 
-Inductive stuck : tid -> state -> Prop :=
-| StuckLock : forall t t' lks l mem,
+Inductive waiting : tid -> state -> Prop :=
+| WaitingLock : forall t t' lks l mem,
                 lks l = Some t' ->
                 t <> t' ->
-                stuck t (ST (LOCK l) nil mem lks)
-| StuckSeq : forall t buf mem lks c1 c2,
-               stuck t (ST c1 buf mem lks) ->
-               stuck t (ST (c1 ;; c2) buf mem lks)
+                waiting t (ST (LOCK l) nil mem lks)
+| WaitingSeq : forall t buf mem lks c1 c2,
+               waiting t (ST c1 buf mem lks) ->
+               waiting t (ST (c1 ;; c2) buf mem lks)
 .
 
-Hint Constructors stuck.
+Hint Constructors waiting.
 
-(* Although using word "value", it actually means unable to move forward *)
-Inductive stvalue : tid -> state -> Prop :=
+Inductive st_normal_form : tid -> state -> Prop :=
 | STV_End : forall t mem lks,
-              stvalue t (ST SKIP nil mem lks)
+              st_normal_form t (ST SKIP nil mem lks)
 | STV_Stuck : forall t st,
-                stuck t st ->
-                stvalue t st
+                waiting t st ->
+                st_normal_form t st
 .
 
-Hint Constructors stvalue.
+Hint Constructors st_normal_form.
 
 (* Note: evt is the event incurred by this step of evaluation *)
 Reserved Notation "t '@' st1 '==>' st2 '[[' evt ']]'" (at level 80).
@@ -931,7 +930,8 @@ Tactic Notation "ststep_cases" tactic(first) ident(c) :=
 
 Theorem strong_progress_st :
   forall c buf mem lks t,
-    stvalue t (ST c buf mem lks) \/ (exists st' evt, t @ (ST c buf mem lks) ==> st' [[evt]]).
+    st_normal_form t (ST c buf mem lks) \/
+    (exists st' evt, t @ (ST c buf mem lks) ==> st' [[evt]]).
 Proof with eauto.
   intros c.
   cmd_cases (induction c) Case;
@@ -982,7 +982,7 @@ Qed.
 (* When a thread get stuck, it can resume when that lock is released *)
 Theorem thread_stuck_resume:
   forall t l buf mem lks lks',
-    stvalue t (ST (LOCK l) buf mem lks) ->
+    st_normal_form t (ST (LOCK l) buf mem lks) ->
     lks' l = None \/ lks' l = Some t ->
     exists st' evt, t @ (ST (LOCK l) buf mem lks') ==> st' [[evt]].
 Proof.
@@ -1064,19 +1064,19 @@ Definition empty_configuration :=
   CFG empty_tids empty_threads empty_memory empty_locks nil.
 
 
-Inductive cfgvalue : configuration -> Prop :=
+Inductive cfg_normal_form : configuration -> Prop :=
 (* All threads finish *)
 | CFGV_End : forall thds mem lks evts,
-               cfgvalue (CFG empty_tids thds mem lks evts)
-(* Deadlock TODO: is this definition OK? *)
+               cfg_normal_form (CFG empty_tids thds mem lks evts)
+(* Deadlock *)
 | CFGV_Deadlock: forall tids thds mem lks evts,
                    (forall t c b, in_tids t tids = true ->
                                   thds t = (c, b) ->
-                                  stuck t (ST c b mem lks)) ->
-                   cfgvalue (CFG tids thds mem lks evts)
+                                  waiting t (ST c b mem lks)) ->
+                   cfg_normal_form (CFG tids thds mem lks evts)
 .
 
-Hint Constructors cfgvalue.
+Hint Constructors cfg_normal_form.
 
 Reserved Notation "cfg1 '-->' cfg2" (at level 60).
 
@@ -1181,7 +1181,7 @@ reachable by the language and semantics I defined above *)
 Theorem tso_semantics:
   exists thds mem lks trace,
     init_cfg codes -->* (CFG empty_tids thds mem lks trace) /\
-    cfgvalue (CFG empty_tids thds mem lks trace) /\ (* final state *)
+    cfg_normal_form (CFG empty_tids thds mem lks trace) /\ (* final state *)
     mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
   eexists.
@@ -1542,7 +1542,8 @@ Hint Resolve sc_no_buffer.
 
 Theorem strong_progress_sc :
   forall c mem lks t,
-    stvalue t (ST c nil mem lks) \/ (exists st' evt, t @ (ST c nil mem lks) ==SC> st' [[evt]]).
+    st_normal_form t (ST c nil mem lks) \/
+    (exists st' evt, t @ (ST c nil mem lks) ==SC> st' [[evt]]).
 Proof with eauto.
   intros c.
   cmd_cases (induction c) Case;
