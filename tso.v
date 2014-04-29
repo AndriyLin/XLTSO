@@ -15,7 +15,7 @@ Contraints:
   than None.
 
 Xuankang LIN
-Last updated: 04/26/2014
+Last updated: 04/28/2014
 
 
 Structure:
@@ -32,7 +32,7 @@ Structure:
 * Proof of TSO Semantics
 * Data-Race-Free
 * Sequential Consistency Semantics
-* DRF Property
+* DRF Guarantee Property
 * TODO.. More?
 *)
 
@@ -1272,189 +1272,6 @@ End TsoSemanticsProof.
 (* ---------------- end of Proof of having TSO Semantics ---------------- *)
 
 
-(* ---------------- Data-Race-Free ---------------- *)
-Inductive writes : cmd -> var -> Prop :=
-| Writes : forall t c buf mem lks x n,
-             (exists st', t @ (ST c buf mem lks) ==> st' [[Some (EV_Write x n)]]) ->
-             writes c x
-.
-
-Hint Constructors writes.
-
-Inductive reads : cmd -> var -> Prop :=
-| Reads : forall t c buf mem lks x,
-            (exists st', t @ (ST c buf mem lks) ==> st' [[Some (EV_Read x)]]) ->
-            reads c x
-.
-
-Hint Constructors reads.
-
-
-(* TODO: use which definition??
-
-(* the variable is just about to be written *)
-Inductive writes : cmd -> var -> Prop :=
-| WritesInAss : forall x ae,
-                  avalue ae ->
-                  writes (x ::= ae) x
-| WritesInSeq : forall x c1 c2,
-                  writes c1 x ->
-                  writes (c1 ;; c2) x
-.
-(* Note: Only 2 cases above can write a variable immediately. IF &
-WHILE needs further steps. *)
-
-Hint Constructors writes.
-
-Tactic Notation "writes_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "WritesInAss" | Case_aux c "WritesInSeq" ].
-
-
-(* the variable is just about to be evaluated, used in reads *)
-Inductive var_in_aexp : var -> aexp -> Prop :=
-| VIA_Var : forall x,
-              var_in_aexp x (AVar x)
-
-| VIA_Plus1 : forall x a1 a2,
-                var_in_aexp x a1 ->
-                var_in_aexp x (APlus a1 a2)
-| VIA_Plus2 : forall x a1 a2,
-                avalue a1 ->
-                var_in_aexp x a2 ->
-                var_in_aexp x (APlus a1 a2)
-
-| VIA_Minus1 : forall x a1 a2,
-                 var_in_aexp x a1 ->
-                 var_in_aexp x (AMinus a1 a2)
-| VIA_Minus2 : forall x a1 a2,
-                 avalue a1 ->
-                 var_in_aexp x a2 ->
-                 var_in_aexp x (AMinus a1 a2)
-
-| VIA_Mult1 : forall x a1 a2,
-                var_in_aexp x a1 ->
-                var_in_aexp x (AMult a1 a2)
-| VIA_Mult2 : forall x a1 a2,
-                avalue a1 ->
-                var_in_aexp x a2 ->
-                var_in_aexp x (AMult a1 a2)
-.
-
-Hint Constructors var_in_aexp.
-
-Tactic Notation "var_in_aexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "VIA_Var"
-  | Case_aux c "VIA_Plus1" | Case_aux c "VIA_Plus2"
-  | Case_aux c "VIA_Minus1" | Case_aux c "VIA_Minus2"
-  | Case_aux c "VIA_Mult1" | Case_aux c "VIA_Mult2" ].
-
-
-(* x is just about to be evaluated in bexp, used in reads *)
-Inductive var_in_bexp : var -> bexp -> Prop :=
-| VIB_Not : forall x be,
-              var_in_bexp x be ->
-              var_in_bexp x (BNot be)
-
-| VIB_And1 : forall x be1 be2,
-               var_in_bexp x be1 ->
-               var_in_bexp x (BAnd be1 be2)
-| VIB_And2 : forall x be1 be2,
-               bvalue be1 ->
-               var_in_bexp x be2 ->
-               var_in_bexp x (BAnd be1 be2)
-
-| VIB_Eq1 : forall x a1 a2,
-              var_in_aexp x a1 ->
-              var_in_bexp x (BEq a1 a2)
-| VIB_Eq2 : forall x a1 a2,
-              avalue a1 ->
-              var_in_aexp x a2 ->
-              var_in_bexp x (BEq a1 a2)
-
-| VIB_Le1 : forall x a1 a2,
-              var_in_aexp x a1 ->
-              var_in_bexp x (BLe a1 a2)
-| VIB_Le2 : forall x a1 a2,
-              avalue a1 ->
-              var_in_aexp x a2 ->
-              var_in_bexp x (BLe a1 a2)
-.
-
-Hint Constructors var_in_bexp.
-
-Tactic Notation "var_in_bexp_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "VIB_Not"
-  | Case_aux c "VIB_And1" | Case_aux c "VIB_And2"
-  | Case_aux c "VIB_Eq1" | Case_aux c "VIB_Eq2"
-  | Case_aux c "VIB_Le1" | Case_aux c "VIB_Le2" ].
-
-
-(* the variable is just about to be evaluated in the command*)
-Inductive reads : cmd -> var -> Prop :=
-| ReadsInAss : forall x y a,
-                 var_in_aexp y a ->
-                 reads (x ::= a) y
-| ReadsInIf : forall b c1 c2 x,
-                var_in_bexp x b ->
-                reads (IFB b THEN c1 ELSE c2 FI) x
-| ReadsInSeq : forall c1 c2 x,
-                 reads c1 x ->
-                 reads (c1 ;; c2) x
-.
-(* Note: Only the 3 cases above can read a var immediately. WHILE is
-expanded to "if b then while else skip end" in the semantics so there
-is no need to add WHILE here *)
-
-Hint Constructors reads.
-
-Tactic Notation "reads_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "ReadsInAss"
-  | Case_aux c "ReadsInIf"
-  | Case_aux c "ReadsInSeq" ].
-
-*)
-
-
-Definition uses (c : cmd) (x : var) : Prop :=
-  writes c x \/ reads c x.
-
-Hint Unfold uses.
-
-Inductive datarace : cmd -> cmd -> Prop :=
-| DataRaceL : forall c1 c2 x,
-                writes c1 x ->
-                uses c2 x ->
-                datarace c1 c2
-| DataRaceR : forall c1 c2 x,
-                writes c2 x ->
-                uses c1 x ->
-                datarace c1 c2
-.
-
-Hint Constructors datarace.
-
-
-Definition data_race_free (cfg : configuration) : Prop :=
-  ~ (exists tids thds mem lks t1 t2 trace,
-       cfg -->* (CFG tids thds mem lks trace)
-       /\ in_tids t1 tids = true
-       /\ in_tids t2 tids = true
-       /\ t1 <> t2
-       /\ datarace (fst (thds t1)) (fst (thds t2))
-    ).
-
-
-(* TODO: need the lemma that "An expression e is data-race free if the
-initial configuration (empty, empty, e) is data-race free"? *)
-
-
-(* ---------------- end of Data-Race-Free ---------------- *)
-
-
 (* ---------------- Sequential Consistency Semantics ---------------- *)
 (* Note: The following is the sequential semantics (without write
 buffers).  Buffer is still declared in state for consistency with TSO,
@@ -1571,7 +1388,7 @@ Proof with eauto.
 Qed.
 
 
-(* Unlike TSO, SC (without write buffers should be deterministic *)
+(* Unlike TSO, SC (without write buffers) should be deterministic *)
 Theorem sc_deterministic:
   forall t st st1 st2 evt1 evt2,
     t @ st ==SC> st1 [[evt1]] ->
@@ -1644,8 +1461,8 @@ Inductive cfgsc : configuration -> configuration -> Prop :=
                 in_tids t tids = true ->
                 thds t = (c, nil) ->
                 t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[evt]] ->
-               (CFG tids thds mem lks trace) --SC>
-                 (CFG tids (override thds t c' nil) mem' lks' (add_event trace t evt))
+                (CFG tids thds mem lks trace) --SC>
+                  (CFG tids (override thds t c' nil) mem' lks' (add_event trace t evt))
 
 where "cfg1 '--SC>' cfg2" := (cfgsc cfg1 cfg2).
 
@@ -1660,39 +1477,138 @@ Notation "cfg1 '--SC>*' cfg2" := (multicfgsc cfg1 cfg2) (at level 40).
 (* ---------------- end of Sequential Consistency Semantics ---------------- *)
 
 
-(* ---------------- DRF Property ---------------- *)
-(* This section is to prove that "data race free programs have SC semantics" *)
+(* ---------------- Data-Race-Free ---------------- *)
+(* The command determines whether "writes c x" is provable, so just
+assign the most basic context. *)
+Inductive writes : cmd -> var -> Prop :=
+| Writes : forall c st' x n,
+             T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[Some (EV_Write x n)]] ->
+             writes c x
+.
 
-(* TODO: do this in Prop ? *)
-Fixpoint _flushall (b : buffer) (m : memory) : memory :=
-(* if using oldest & flushone function, coq cannot infer which variable is decreasing *)
-  match b with
-    | nil => m
-    | (x, v) :: t => _flushall t (update m x v)
-  end.
-
-(* TODO: is this necessary? cfg_normal_form requires buffer to be empty *)
-Fixpoint flushall (cfg : configuration) : configuration :=
-  admit.
+Hint Constructors writes.
 
 
-Theorem drf_property :
-  forall cfg cfg_sc,
-    data_race_free cfg ->
-    cfg --SC>* cfg_sc ->
-    cfg_normal_form cfg_sc ->
-    exists cfg_tso, cfg -->* cfg_tso /\ cfg_normal_form cfg_tso.
-Proof with eauto.
-  intros cfg cfgsc Hdrf Hsc Hnfsc.
-  destruct cfg as [tids thds mem lks trc].
+(* The command determines whether "reads c x" is provable, so just
+assign the most basic context. *)
+Inductive reads : cmd -> var -> Prop :=
+| Reads : forall c st' x,
+            T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[Some (EV_Read x)]] ->
+            reads c x
+.
 
-(* TODO *)
+Hint Constructors reads.
+
+
+Module TestWritesReads.
+
+Example test_writes1 : writes (X ::= ANum 10) X.
+Proof. eauto. Qed.
+
+Example test_writes2 : ~ writes (SKIP ;; X ::= ANum 10) X.
+Proof.
+  intros Hf.
+  inv Hf.
+  inv H.
+  inv H7.
 Qed.
 
-(* TODO: Resume here *)
-(* ---------------- end of DRF Property ---------------- *)
+Example test_read1 : reads (IFB (BEq (ANum 10) (AVar X)) THEN SKIP ELSE SKIP FI) X.
+Proof. eauto. Qed.
+
+Example test_read2 : ~ reads (IFB (BEq (AVar Y) (AVar X)) THEN SKIP ELSE SKIP FI) X.
+Proof.
+  intros Hf.
+  inv Hf.
+  inv H.
+  inv H8.
+  inv H5.
+  inv H6.
+  inv H2.
+  inv H3.
+Qed.
+
+End TestWritesReads.
 
 
-(* Doubts: Do I need to use events to abstract? Yes, I may define
-that: two xx are equiv if they have the same sequence of events *)
+Definition uses (c : cmd) (x : var) : Prop :=
+  writes c x \/ reads c x.
+
+Hint Unfold uses.
+
+
+Inductive datarace : cmd -> cmd -> Prop :=
+| DataRaceL : forall c1 c2 x,
+                writes c1 x ->
+                uses c2 x ->
+                datarace c1 c2
+| DataRaceR : forall c1 c2 x,
+                writes c2 x ->
+                uses c1 x ->
+                datarace c1 c2
+.
+
+Hint Constructors datarace.
+
+(* Note: DRF must be under SC semantics *)
+Definition data_race_free (cfg : configuration) : Prop :=
+  ~ (exists tids thds mem lks t1 t2 trc,
+       cfg --SC>* (CFG tids thds mem lks trc)
+       /\ in_tids t1 tids = true
+       /\ in_tids t2 tids = true
+       /\ t1 <> t2
+       /\ datarace (fst (thds t1)) (fst (thds t2))
+    ).
+
+
+Theorem drf_preservation :
+  forall cfg1 cfg2, data_race_free cfg1 ->
+                    cfg1 --SC>* cfg2 ->
+                    data_race_free cfg2.
+Proof with eauto.
+  intros cfg1 cfg2 Hdrf H.
+  multi_cases (induction H) Case...
+  Case "multi_step".
+  apply IHmulti.
+  intros Hf.
+  apply Hdrf.
+  inversion Hf as [tids]; clear Hf.
+  inversion H1 as [thds]; clear H1.
+  inversion H2 as [mem]; clear H2.
+  inversion H1 as [lks]; clear H1.
+  inversion H2 as [t1]; clear H2.
+  inversion H1 as [t2]; clear H1.
+  inversion H2 as [trc]; clear H2.
+  inv H1.
+
+  exists tids; exists thds; exists mem; exists lks;
+  exists t1; exists t2; exists trc.
+  split...
+
+  apply multi_step with y...
+Qed.
+
+Hint Resolve drf_preservation.
+(* ---------------- end of Data-Race-Free ---------------- *)
+
+
+(* ---------------- DRF Guarantee Property ---------------- *)
+(* This section is to prove that "data race free programs have SC semantics" *)
+
+Theorem drf_must_have_unlock :
+  forall tids thds mem lks trc t1 t2,
+    data_race_free (CFG tids thds mem lks trc) ->
+    in_tids t1 tids = true ->
+    in_tids t2 tids = true ->
+
+    te1 = (t1, evt1) ->
+    te2 = (t2, evt2) ->
+    te1 before te2 in trc ->
+(* TODO: why not just define data_race on events?? *)
+    evt1 & evt2 are accessing (at least one is write) the same variable ->
+    exists te3, te3 = (t1, UNLOCK) /\ te1 before te3 in trc /\ te3 before te2 in trc.
+
+(* Gustavo didn't prove this, so he's not sure about the difficulty, if hard, make this an axiom. *)
+
+(* ---------------- end of DRF Guarantee Property ---------------- *)
 
