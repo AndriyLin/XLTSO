@@ -86,6 +86,21 @@ Axiom functional_extensionality :
 
 Hint Resolve functional_extensionality.
 
+(* The following axioms are copied from Logic.v in SF book. They might be useful. *)
+Axiom double_negation : forall P : Prop, ~~P -> P.
+(* Coq complains: double_negation cannot be used as a hint.
+Hint Resolve double_negation.
+*)
+
+Axiom excluded_middle : forall P : Prop, P \/ ~P.
+Hint Resolve excluded_middle.
+
+Axiom de_morgan_not_and_not : forall P Q : Prop, ~(~P /\ ~Q) -> P \/ Q.
+Hint Resolve de_morgan_not_and_not.
+
+Axiom implies_to_or : forall P Q : Prop, (P->Q) -> (~P\/Q).
+Hint Resolve implies_to_or.
+
 
 (* ---------------------------------------------------------------- *)
 (* For arithmatic & boolean operations *)
@@ -100,11 +115,17 @@ Fixpoint ble_nat (n m : nat) : bool :=
 
 
 (* ---------------------------------------------------------------- *)
-(* For write buffer *)
+(* For write buffer & trace *)
 Definition hd {X} (l : list X) : option X :=
   match l with
     | nil => None
     | hd :: _ => Some hd
+  end.
+
+Fixpoint append {X} (l : list X) (v : X) : list X :=
+  match l with
+    | nil => [v]
+    | h :: t => h :: append t v
   end.
 
 
