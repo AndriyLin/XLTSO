@@ -411,24 +411,20 @@ Inductive event : Type :=
 | EV_Read (x : var)
 | EV_Write (x : var) (n : nat)
 | EV_Lock (l : lid)
-| EV_Unlock (l : lid).
+| EV_Unlock (l : lid)
+| EV_None. (* Nothing significant happened, but moved one step anyway *)
 
 Hint Constructors event.
 
 Tactic Notation "event_cases" tactic(first) ident(c) :=
   first;
   [ Case_aux c "EV_Read" | Case_aux c "EV_Write"
-  | Case_aux c "EV_Lock" | Case_aux c "EV_Unlock" ].
+  | Case_aux c "EV_Lock" | Case_aux c "EV_Unlock"
+  | Case_aux c "EV_None"
+  ].
 
 
 Definition trace : Type := list (tid * event).
-
-(* TODO: I currently add event to the beginning, is that the best choice? *)
-Definition add_event (tr : trace) (t : tid) (oe : option event) : trace :=
-  match oe with
-    | Some e => append tr (t, e)
-    | None => tr
-  end.
 (* ---------------- end of Event ---------------- *)
 
 
@@ -458,9 +454,9 @@ Hint Constructors avalue.
 (* Note: here the "evt" represents whether this step would incur an event *)
 Reserved Notation "a1 '/-' b '~' m '==A>' a2 '[[' evt ']]'" (at level 80).
 
-Inductive astep : buffer -> memory -> aexp -> aexp -> option event -> Prop :=
+Inductive astep : buffer -> memory -> aexp -> aexp -> event -> Prop :=
 | AS_Plus : forall b m n1 n2,
-              (APlus (ANum n1) (ANum n2)) /- b ~ m ==A> ANum (n1 + n2) [[None]]
+              (APlus (ANum n1) (ANum n2)) /- b ~ m ==A> ANum (n1 + n2) [[EV_None]]
 | AS_Plus1 : forall b m a1 a1' a2 evt,
                a1 /- b ~ m ==A> a1' [[evt]] ->
                (APlus a1 a2) /- b ~ m ==A> (APlus a1' a2) [[evt]]
@@ -470,7 +466,7 @@ Inductive astep : buffer -> memory -> aexp -> aexp -> option event -> Prop :=
                (APlus a1 a2) /- b ~ m ==A> (APlus a1 a2') [[evt]]
 
 | AS_Minus : forall b m n1 n2,
-               AMinus (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 - n2) [[None]]
+               AMinus (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 - n2) [[EV_None]]
 | AS_Minus1 : forall b m a1 a1' a2 evt,
                 a1 /- b ~ m ==A> a1' [[evt]] ->
                 (AMinus a1 a2) /- b ~ m ==A> (AMinus a1' a2) [[evt]]
@@ -480,7 +476,7 @@ Inductive astep : buffer -> memory -> aexp -> aexp -> option event -> Prop :=
                 (AMinus a1 a2) /- b ~ m ==A> (AMinus a1 a2') [[evt]]
 
 | AS_Mult : forall b m n1 n2,
-              AMult (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 * n2) [[None]]
+              AMult (ANum n1) (ANum n2) /- b ~ m ==A> ANum (n1 * n2) [[EV_None]]
 | AS_Mult1 : forall b m a1 a1' a2 evt,
                a1 /- b ~ m ==A> a1' [[evt]] ->
                (AMult a1 a2) /- b ~ m ==A> (AMult a1' a2) [[evt]]
@@ -491,10 +487,10 @@ Inductive astep : buffer -> memory -> aexp -> aexp -> option event -> Prop :=
 
 | AS_VarBuf : forall b m x n,
                 get b x = Some n ->
-                (AVar x) /- b ~ m ==A> (ANum n) [[Some (EV_Read x)]]
+                (AVar x) /- b ~ m ==A> (ANum n) [[EV_Read x]]
 | AS_VarMem : forall b m x,
                 get b x = None ->
-                (AVar x) /- b ~ m ==A> ANum (m x) [[Some (EV_Read x)]]
+                (AVar x) /- b ~ m ==A> ANum (m x) [[EV_Read x]]
 
 where "a1 '/-' b '~' m '==A>' a2 '[[' evt ']]'" := (astep b m a1 a2 evt).
 
@@ -627,15 +623,15 @@ Hint Constructors bvalue.
 (* Note: here the "evt" represents whether this step would incur an event *)
 Reserved Notation "b1 '/-' buf '~' mem '==B>' b2 '[[' evt ']]'" (at level 80).
 
-Inductive bstep : buffer -> memory -> bexp -> bexp -> option event -> Prop :=
+Inductive bstep : buffer -> memory -> bexp -> bexp -> event -> Prop :=
 | BS_Not : forall buf mem b,
-             BNot (BBool b) /- buf ~ mem ==B> BBool (negb b) [[None]]
+             BNot (BBool b) /- buf ~ mem ==B> BBool (negb b) [[EV_None]]
 | BS_Not1 : forall buf mem b b' evt,
               b /- buf ~ mem ==B> b' [[evt]] ->
               (BNot b) /- buf ~ mem ==B> BNot b' [[evt]]
 
 | BS_And : forall buf mem b1 b2,
-             (BAnd (BBool b1) (BBool b2)) /- buf ~ mem ==B> BBool (andb b1 b2) [[None]]
+             (BAnd (BBool b1) (BBool b2)) /- buf ~ mem ==B> BBool (andb b1 b2) [[EV_None]]
 | BS_And1 : forall buf mem be1 be1' be2 evt,
               be1 /- buf ~ mem ==B> be1' [[evt]] ->
               (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1' be2 [[evt]]
@@ -645,7 +641,7 @@ Inductive bstep : buffer -> memory -> bexp -> bexp -> option event -> Prop :=
               (BAnd be1 be2) /- buf ~ mem ==B> BAnd be1 be2' [[evt]]
 
 | BS_Eq : forall buf mem n1 n2,
-            (BEq (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (beq_nat n1 n2) [[None]]
+            (BEq (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (beq_nat n1 n2) [[EV_None]]
 | BS_Eq1 : forall buf mem a1 a1' a2 evt,
              a1 /- buf ~ mem ==A> a1' [[evt]] ->
              (BEq a1 a2) /- buf ~ mem ==B> BEq a1' a2 [[evt]]
@@ -655,7 +651,7 @@ Inductive bstep : buffer -> memory -> bexp -> bexp -> option event -> Prop :=
              (BEq a1 a2) /- buf ~ mem ==B> BEq a1 a2' [[evt]]
 
 | BS_Le : forall buf mem n1 n2,
-            (BLe (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (ble_nat n1 n2) [[None]]
+            (BLe (ANum n1) (ANum n2)) /- buf ~ mem ==B> BBool (ble_nat n1 n2) [[EV_None]]
 | BS_Le1 : forall buf mem a1 a1' a2 evt,
              a1 /- buf ~ mem ==A> a1' [[evt]] ->
              (BLe a1 a2) /- buf ~ mem ==B> BLe a1' a2 [[evt]]
@@ -852,26 +848,26 @@ Hint Constructors st_normal_form.
 (* Note: evt is the event incurred by this step of evaluation *)
 Reserved Notation "t '@' st1 '==>' st2 '[[' evt ']]'" (at level 80).
 
-Inductive ststep : tid -> state -> state -> option event -> Prop :=
+Inductive ststep : tid -> state -> state -> event -> Prop :=
 | ST_Ass : forall t x n buf mem lks,
              t @ (ST (x ::= ANum n) buf mem lks) ==>
-               (ST SKIP (write buf x n) mem lks) [[Some (EV_Write x n)]]
+               (ST SKIP (write buf x n) mem lks) [[EV_Write x n]]
 | ST_AssStep : forall t x a a' buf mem lks evt,
                  a /- buf ~ mem ==A> a' [[evt]] ->
                  t @ (ST (x ::= a) buf mem lks) ==> (ST (x ::= a') buf mem lks) [[evt]]
 
 | ST_Seq : forall t c2 buf mem lks,
-             t @ (ST (SKIP ;; c2) buf mem lks) ==> (ST c2 buf mem lks) [[None]]
+             t @ (ST (SKIP ;; c2) buf mem lks) ==> (ST c2 buf mem lks) [[EV_None]]
 | ST_SeqStep : forall t c1 c1' c2 buf mem lks buf' mem' lks' evt,
                  t @ (ST c1 buf mem lks) ==> (ST c1' buf' mem' lks') [[evt]] ->
                  t @ (ST (c1 ;; c2) buf mem lks) ==> (ST (c1' ;; c2) buf' mem' lks') [[evt]]
 
 | ST_IfTrue : forall t c1 c2 buf mem lks,
                 t @ (ST (IFB (BBool true) THEN c1 ELSE c2 FI) buf mem lks) ==>
-                  (ST c1 buf mem lks) [[None]]
+                  (ST c1 buf mem lks) [[EV_None]]
 | ST_IfFalse : forall t c1 c2 buf mem lks,
                  t @ (ST (IFB (BBool false) THEN c1 ELSE c2 FI) buf mem lks) ==>
-                   (ST c2 buf mem lks) [[None]]
+                   (ST c2 buf mem lks) [[EV_None]]
 | ST_IfStep : forall t c1 c2 be be' buf mem lks evt,
                 be /- buf ~ mem ==B> be' [[evt]] ->
                 t @ (ST (IFB be THEN c1 ELSE c2 FI) buf mem lks) ==>
@@ -879,35 +875,36 @@ Inductive ststep : tid -> state -> state -> option event -> Prop :=
 
 | ST_While : forall t b c buf mem lks,
                t @ (ST (WHILE b DO c END) buf mem lks) ==>
-                 (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks) [[None]]
+                 (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI) buf mem lks)
+                 [[EV_None]]
 
 | ST_FlushOne : forall t buf mem lks x n c,
                   (* Here it's defined as "it can flush no matter blocked or not" *)
                   oldest buf = Some (x, n) ->
                   t @ (ST c buf mem lks) ==> (ST c (flushone buf) (update mem x n) lks)
-                    [[None]]
+                    [[EV_None]]
 
 (* to LOCK, buffer must be empty *)
 | ST_Lock : forall t mem lks lk,
               lks lk = None ->
               t @ (ST (LOCK lk) nil mem lks) ==>
-                (ST SKIP nil mem (lock lks t lk)) [[Some (EV_Lock lk)]]
+                (ST SKIP nil mem (lock lks t lk)) [[EV_Lock lk]]
 | ST_LockAgain : forall t mem lks lk,
                    lks lk = Some t ->
-                   t @ (ST (LOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
+                   t @ (ST (LOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
 
 (* to UNLOCK, buffer must be empty *)
 | ST_Unlock : forall t mem lks lk,
                 lks lk = Some t ->
                 t @ (ST (UNLOCK lk) nil mem lks) ==>
-                  (ST SKIP nil mem (unlock lks t lk)) [[Some (EV_Unlock lk)]]
+                  (ST SKIP nil mem (unlock lks t lk)) [[EV_Unlock lk]]
 | ST_UnlockNil : forall t mem lks lk,
                    lks lk = None ->
-                   t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
+                   t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
 | ST_UnlockOthers : forall t t' mem lks lk,
                       lks lk = Some t' ->
                       t <> t' ->
-                      t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[None]]
+                      t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
 
 
 where "t1 '@' st1 '==>' st2 '[[' evt ']]'" := (ststep t1 st1 st2 evt).
@@ -938,7 +935,7 @@ Proof with eauto.
     destruct buf...
     right.
     destruct p.
-    exists (ST SKIP buf (update mem v n) lks); exists None...
+    exists (ST SKIP buf (update mem v n) lks); exists EV_None...
     apply ST_FlushOne...
   Case "::=".
     right; destruct (strong_progress_a a buf mem)...
@@ -1011,8 +1008,8 @@ Proof with auto.
   remember (ST c buf empty_memory empty_locks) as st.
   remember (ST SKIP buf empty_memory empty_locks) as st1.
   remember (ST c nil (update empty_memory X 100) empty_locks) as st2.
-  remember (None : option event) as evt1.
-  remember (None : option event) as evt2.
+  remember EV_None as evt1.
+  remember EV_None as evt2.
   assert (T0 @ st ==> st1 [[evt1]]).
     subst...
   assert (T0 @ st ==> st2 [[evt2]]).
@@ -1052,48 +1049,48 @@ Record configuration := CFG {
   cfg_tids : set tid;
   cfg_thds : threads;
   cfg_mem : memory;
-  cfg_lks : lock_status;
-  cfg_evts : trace
+  cfg_lks : lock_status
 }.
 
 Hint Constructors configuration.
 
 Definition empty_configuration :=
-  CFG empty_tids empty_threads empty_memory empty_locks nil.
+  CFG empty_tids empty_threads empty_memory empty_locks.
 
 
 Inductive cfg_normal_form : configuration -> Prop :=
 (* All threads finish *)
-| CFGV_End : forall thds mem lks evts,
-               cfg_normal_form (CFG empty_tids thds mem lks evts)
+| CFGV_End : forall thds mem lks,
+               cfg_normal_form (CFG empty_tids thds mem lks)
 (* Deadlock *)
-| CFGV_Deadlock: forall tids thds mem lks evts,
+| CFGV_Deadlock: forall tids thds mem lks,
                    (forall t c b, in_tids t tids = true ->
                                   thds t = (c, b) ->
                                   waiting t (ST c b mem lks)) ->
-                   cfg_normal_form (CFG tids thds mem lks evts)
+                   cfg_normal_form (CFG tids thds mem lks)
 .
 
 Hint Constructors cfg_normal_form.
 
-Reserved Notation "cfg1 '-->' cfg2" (at level 60).
+Reserved Notation "cfg1 '-->' cfg2 '[[' tevt ']]'" (at level 60).
 
-Inductive cfgstep : configuration -> configuration -> Prop :=
+Inductive cfgstep : configuration -> configuration -> (tid * event) -> Prop :=
 (* One thread already ends its job, thus remove it *)
-| CFGS_Done : forall t tids thds mem lks evts,
+| CFGS_Done : forall t tids thds mem lks,
                 in_tids t tids = true ->
                 thds t = (SKIP, nil) ->
-                (CFG tids thds mem lks evts) --> (CFG (remove_tid t tids) thds mem lks evts)
+                (CFG tids thds mem lks) --> (CFG (remove_tid t tids) thds mem lks)
+                                        [[(t, EV_None)]]
 
 (* One thread can move one step forward, in terms of "state" *)
-| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks' evt trace,
+| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks' evt,
                in_tids t tids = true ->
                thds t = (c, b) ->
                t @ (ST c b mem lks) ==> (ST c' b' mem' lks') [[evt]] ->
-               (CFG tids thds mem lks trace) -->
-                 (CFG tids (override thds t c' b') mem' lks' (add_event trace t evt))
+               (CFG tids thds mem lks) -->
+                 (CFG tids (override thds t c' b') mem' lks') [[(t, evt)]]
 
-where "cfg1 '-->' cfg2" := (cfgstep cfg1 cfg2).
+where "cfg1 '-->' cfg2 '[[' tevt ']]'" := (cfgstep cfg1 cfg2 tevt).
 
 Hint Constructors cfgstep.
 
@@ -1108,9 +1105,9 @@ Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configurat
     | nil => accu
     | h :: tlc =>
       match accu with
-        | CFG tids thds mem lks trace =>
+        | CFG tids thds mem lks =>
           let t := TID n in
-          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks trace in
+          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks in
           _init_cfg tlc (S n) accu'
       end
   end.
@@ -1123,8 +1120,45 @@ Definition init_cfg (lc : list cmd) : configuration :=
 Hint Unfold init_cfg.
 
 
+(* multi tso smallstep / multi sc smallstep *)
+Definition relation (X:Type) := X -> X -> (tid * event) -> Prop.
+
+Inductive multi {X:Type} (R: relation X) : X -> X -> trace -> Prop :=
+| multi_refl  : forall x,
+                  multi R x x []
+| multi_step : forall x y z tevt trc,
+                 R x y tevt ->
+                 multi R y z trc ->
+                 multi R x z (tevt :: trc).
+
+Hint Constructors multi.
+
+Tactic Notation "multi_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "multi_refl" | Case_aux c "multi_step" ].
+
+Theorem multi_R : forall (X:Type) (R:relation X) (x y : X) tevt,
+                    R x y tevt -> multi R x y [tevt].
+Proof. eauto. Qed.
+
+Hint Resolve multi_R.
+
+Theorem multi_trans :
+  forall (X:Type) (R: relation X) (x y z : X) trc1 trc2,
+      multi R x y trc1 ->
+      multi R y z trc2 ->
+      multi R x z (trc1 ++ trc2).
+Proof.
+  intros X R x y z trc1 trc2 Hxy Hyz.
+  multi_cases (induction Hxy) Case;
+    simpl; eauto.
+Qed.
+
+Hint Resolve multi_trans.
+
+
 Definition multicfgstep := multi cfgstep.
-Notation "cfg1 '-->*' cfg2" := (multicfgstep cfg1 cfg2) (at level 40).
+Notation "cfg1 '-->*' cfg2 '[[' tevts ']]'" := (multicfgstep cfg1 cfg2 tevts) (at level 40).
 
 (* All above are the definitions for the parallel language *)
 (* ---------------- end of Threads & Configuration ---------------- *)
@@ -1163,10 +1197,10 @@ Definition codes : list cmd :=
 
 (* The following is to prove that the init_cfg function works as expected *)
 Example preprocess:
-  forall tids thds mem lks trace,
-    init_cfg codes = (CFG tids thds mem lks trace) ->
+  forall tids thds mem lks,
+    init_cfg codes = (CFG tids thds mem lks) ->
     size_tids tids = 2 /\ in_tids T0 tids = true /\ in_tids T1 tids = true
-    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil) /\ trace = nil.
+    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil).
 Proof.
   intros.
   unfold codes, proc0, proc1, init_cfg in *.
@@ -1175,11 +1209,11 @@ Proof.
 Qed.
 
 (* The following is to prove that the final state is actually
-reachable by the language and semantics I defined above *)
+reachable by the language and semantics defined above. *)
 Theorem tso_semantics:
-  exists thds mem lks trace,
-    init_cfg codes -->* (CFG empty_tids thds mem lks trace) /\
-    cfg_normal_form (CFG empty_tids thds mem lks trace) /\ (* final state *)
+  exists thds mem lks trc,
+    init_cfg codes -->* (CFG empty_tids thds mem lks) [[trc]] /\
+    cfg_normal_form (CFG empty_tids thds mem lks) /\ (* final state *)
     mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
   eexists.
@@ -1278,26 +1312,26 @@ buffers).  Buffer is still declared in state for consistency with TSO,
 but is as always nil in semantics. *)
 Reserved Notation "t '@' st1 '==SC>' st2 '[[' evt ']]'" (at level 80).
 
-Inductive sc : tid -> state -> state -> option event -> Prop :=
+Inductive sc : tid -> state -> state -> event -> Prop :=
 | SC_Ass : forall t x n mem lks,
              t @ (ST (x ::= ANum n) nil mem lks) ==SC>
-                 (ST SKIP nil (update mem x n) lks) [[Some (EV_Write x n)]]
+                 (ST SKIP nil (update mem x n) lks) [[EV_Write x n]]
 | SC_AssStep : forall t x a a' mem lks evt,
                  a /- nil ~ mem ==A> a' [[evt]] ->
                  t @ (ST (x ::= a) nil mem lks) ==SC> (ST (x ::= a') nil mem lks) [[evt]]
 
 | SC_Seq : forall t c2 mem lks,
-             t @ (ST (SKIP ;; c2) nil mem lks) ==SC> (ST c2 nil mem lks) [[None]]
+             t @ (ST (SKIP ;; c2) nil mem lks) ==SC> (ST c2 nil mem lks) [[EV_None]]
 | SC_SeqStep : forall t c1 c1' c2 mem lks mem' lks' evt,
                  t @ (ST c1 nil mem lks) ==SC> (ST c1' nil mem' lks') [[evt]] ->
                  t @ (ST (c1 ;; c2) nil mem lks) ==SC> (ST (c1' ;; c2) nil mem' lks') [[evt]]
 
 | SC_IfTrue : forall t c1 c2 mem lks,
                 t @ (ST (IFB (BBool true) THEN c1 ELSE c2 FI) nil mem lks) ==SC>
-                    (ST c1 nil mem lks) [[None]]
+                    (ST c1 nil mem lks) [[EV_None]]
 | SC_IfFalse : forall t c1 c2 mem lks,
                  t @ (ST (IFB (BBool false) THEN c1 ELSE c2 FI) nil mem lks) ==SC>
-                     (ST c2 nil mem lks) [[None]]
+                     (ST c2 nil mem lks) [[EV_None]]
 | SC_IfStep : forall t c1 c2 be be' mem lks evt,
                 be /- nil ~ mem ==B> be' [[evt]] ->
                 t @ (ST (IFB be THEN c1 ELSE c2 FI) nil mem lks) ==SC>
@@ -1306,28 +1340,28 @@ Inductive sc : tid -> state -> state -> option event -> Prop :=
 | SC_While : forall t b c mem lks,
                t @ (ST (WHILE b DO c END) nil mem lks) ==SC>
                    (ST (IFB b THEN (c ;; (WHILE b DO c END)) ELSE SKIP FI)
-                       nil mem lks) [[None]]
+                       nil mem lks) [[EV_None]]
 
 (* The following rules are the same as TSO *)
 | SC_Lock : forall t mem lks lk,
               lks lk = None ->
               t @ (ST (LOCK lk) nil mem lks) ==SC>
-                (ST SKIP nil mem (lock lks t lk)) [[Some (EV_Lock lk)]]
+                (ST SKIP nil mem (lock lks t lk)) [[EV_Lock lk]]
 | SC_LockAgain : forall t mem lks lk,
                    lks lk = Some t ->
-                   t @ (ST (LOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[None]]
+                   t @ (ST (LOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
 
 | SC_Unlock : forall t mem lks lk,
                 lks lk = Some t ->
                 t @ (ST (UNLOCK lk) nil mem lks) ==SC>
-                  (ST SKIP nil mem (unlock lks t lk)) [[Some (EV_Unlock lk)]]
+                  (ST SKIP nil mem (unlock lks t lk)) [[EV_Unlock lk]]
 | SC_UnlockNil : forall t mem lks lk,
                    lks lk = None ->
-                   t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[None]]
+                   t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
 | SC_UnlockOthers : forall t t' mem lks lk,
                       lks lk = Some t' ->
                       t <> t' ->
-                      t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[None]]
+                      t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
 
 
 where "t1 '@' st1 '==SC>' st2 '[[' evt ']]'" := (sc t1 st1 st2 evt).
@@ -1447,24 +1481,25 @@ Proof with eauto.
 Qed.
 
 
-Reserved Notation "cfg1 '--SC>' cfg2" (at level 60).
+Reserved Notation "cfg1 '--SC>' cfg2 '[[' tevt ']]'" (at level 60).
 
-Inductive cfgsc : configuration -> configuration -> Prop :=
+Inductive cfgsc : configuration -> configuration -> (tid * event) -> Prop :=
 (* One thread already ends its job, thus remove it *)
-| CFGSC_Done : forall t tids thds mem lks evts,
+| CFGSC_Done : forall t tids thds mem lks,
                  in_tids t tids = true ->
                  thds t = (SKIP, nil) ->
-                 (CFG tids thds mem lks evts) --SC> (CFG (remove_tid t tids) thds mem lks evts)
+                 (CFG tids thds mem lks) --SC> (CFG (remove_tid t tids) thds mem lks)
+                                                 [[(t, EV_None)]]
 
 (* One thread can move one step forward, in terms of "state" *)
-| CFGSC_One : forall t tids thds c c' mem mem' lks lks' evt trace,
+| CFGSC_One : forall t tids thds c c' mem mem' lks lks' evt,
                 in_tids t tids = true ->
                 thds t = (c, nil) ->
                 t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[evt]] ->
-                (CFG tids thds mem lks trace) --SC>
-                  (CFG tids (override thds t c' nil) mem' lks' (add_event trace t evt))
+                (CFG tids thds mem lks) --SC>
+                  (CFG tids (override thds t c' nil) mem' lks') [[(t, evt)]]
 
-where "cfg1 '--SC>' cfg2" := (cfgsc cfg1 cfg2).
+where "cfg1 '--SC>' cfg2 '[[' tevt ']]'" := (cfgsc cfg1 cfg2 tevt).
 
 Hint Constructors cfgsc.
 
@@ -1473,7 +1508,7 @@ Tactic Notation "cfgsc_cases" tactic(first) ident(c) :=
   [ Case_aux c "CFGSC_Done" | Case_aux c "CFGSC_One" ].
 
 Definition multicfgsc := multi cfgsc.
-Notation "cfg1 '--SC>*' cfg2" := (multicfgsc cfg1 cfg2) (at level 40).
+Notation "cfg1 '--SC>*' cfg2 '[[' tevts ']]'" := (multicfgsc cfg1 cfg2 tevts) (at level 40).
 (* ---------------- end of Sequential Consistency Semantics ---------------- *)
 
 
@@ -1482,18 +1517,17 @@ Notation "cfg1 '--SC>*' cfg2" := (multicfgsc cfg1 cfg2) (at level 40).
 assign the most basic context. *)
 Inductive writes : cmd -> var -> Prop :=
 | Writes : forall c st' x n,
-             T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[Some (EV_Write x n)]] ->
+             T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[EV_Write x n]] ->
              writes c x
 .
 
 Hint Constructors writes.
 
-
 (* The command determines whether "reads c x" is provable, so just
 assign the most basic context. *)
 Inductive reads : cmd -> var -> Prop :=
 | Reads : forall c st' x,
-            T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[Some (EV_Read x)]] ->
+            T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[EV_Read x]] ->
             reads c x
 .
 
@@ -1553,7 +1587,7 @@ Hint Constructors datarace.
 (* Note: DRF must be under SC semantics *)
 Definition data_race_free (cfg : configuration) : Prop :=
   ~ (exists tids thds mem lks t1 t2 trc,
-       cfg --SC>* (CFG tids thds mem lks trc)
+       cfg --SC>* (CFG tids thds mem lks) [[trc]]
        /\ in_tids t1 tids = true
        /\ in_tids t2 tids = true
        /\ t1 <> t2
@@ -1562,11 +1596,11 @@ Definition data_race_free (cfg : configuration) : Prop :=
 
 
 Theorem drf_preservation :
-  forall cfg1 cfg2, data_race_free cfg1 ->
-                    cfg1 --SC>* cfg2 ->
+  forall cfg1 cfg2 trc, data_race_free cfg1 ->
+                    cfg1 --SC>* cfg2 [[trc]] ->
                     data_race_free cfg2.
 Proof with eauto.
-  intros cfg1 cfg2 Hdrf H.
+  intros cfg1 cfg2 trc Hdrf H.
   multi_cases (induction H) Case...
   Case "multi_step".
   apply IHmulti.
@@ -1578,11 +1612,11 @@ Proof with eauto.
   inversion H1 as [lks]; clear H1.
   inversion H2 as [t1]; clear H2.
   inversion H1 as [t2]; clear H1.
-  inversion H2 as [trc]; clear H2.
+  inversion H2 as [trc']; clear H2.
   inv H1.
 
   exists tids; exists thds; exists mem; exists lks;
-  exists t1; exists t2; exists trc.
+  exists t1; exists t2; exists (tevt :: trc').
   split...
 
   apply multi_step with y...
@@ -1601,12 +1635,6 @@ so I have to refine my definitions first. *)
 (* data-race is defined on 2 commands. Because events must have a
 order between them, so conflicts should be defined in terms of
 events. but has the same meaning as data-race.  *)
-
-(* TODO:
-1. change "Some EVENT" to "EVENT" which also contains an event NONE
-2. each configuration smallstep returns (tid * event)
-3. configuration multi-step collects such (tid * event) into a list
-*)
 
 Theorem diamond :
   cfg0 --> cfg1 with t1 ~ evt1 ->
