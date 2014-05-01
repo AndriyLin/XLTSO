@@ -15,7 +15,7 @@ Contraints:
   than None.
 
 Xuankang LIN
-Last updated: 04/28/2014
+Last updated: 05/01/2014
 
 
 Structure:
@@ -30,8 +30,8 @@ Structure:
 * Commands & State (uni-thread)
 * Threads & Configuration (multi-threads)
 * Proof of TSO Semantics
-* Data-Race-Free
 * Sequential Consistency Semantics
+* Data-Race-Free
 * DRF Guarantee Property
 * TODO.. More?
 *)
@@ -1595,20 +1595,54 @@ Hint Resolve drf_preservation.
 (* ---------------- DRF Guarantee Property ---------------- *)
 (* This section is to prove that "data race free programs have SC semantics" *)
 
+(* I find it hard to write down the theorems using my current data structures,
+so I have to refine my definitions first. *)
+
+(* data-race is defined on 2 commands. Because events must have a
+order between them, so conflicts should be defined in terms of
+events. but has the same meaning as data-race.  *)
+
+(* TODO:
+1. change "Some EVENT" to "EVENT" which also contains an event NONE
+2. each configuration smallstep returns (tid * event)
+3. configuration multi-step collects such (tid * event) into a list
+*)
+
+Theorem diamond :
+  cfg0 --> cfg1 with t1 ~ evt1 ->
+  cfg1 --> cfg2 with t2 ~ evt2 ->
+  t1 <> t2 ->
+  no conflict(data-race) between evt1 and evt2 ->
+  exists cfg1', cfg0 --> cfg1' with t2 ~ evt2 /\
+                cfg1' --> cfg2 with t1 ~ evt1.
+
+
 Theorem drf_must_have_unlock :
-  forall tids thds mem lks trc t1 t2,
-    data_race_free (CFG tids thds mem lks trc) ->
-    in_tids t1 tids = true ->
-    in_tids t2 tids = true ->
+  cfg -->* cfg' with a list of evts ->
+  in that list, (t1, evt1) < (t2, evt2) ->
+  evt1 and evt2 have data-race ->
+  exists (t1, unlock) between (t1, evt1) and (t2, evt2) in the list.
+(* Gustavo didn't prove this, so he's not sure about the difficulty,
+if hard, make this an axiom. *)
 
-    te1 = (t1, evt1) ->
-    te2 = (t2, evt2) ->
-    te1 before te2 in trc ->
-(* TODO: why not just define data_race on events?? *)
-    evt1 & evt2 are accessing (at least one is write) the same variable ->
-    exists te3, te3 = (t1, UNLOCK) /\ te1 before te3 in trc /\ te3 before te2 in trc.
 
-(* Gustavo didn't prove this, so he's not sure about the difficulty, if hard, make this an axiom. *)
+Inductive flattening : configuration -> configuration -> Prop :=
+(* flush out all buffers *)
+.
+
+Inductive simulation : configuration -> configuration -> configuration -> Prop :=
+| Simulation : forall c0 ctso csc,
+                 c0 -->* ctso ->
+                 c0 --SC>* csc ->
+                 flattening ctso csc ->
+                 simulation c0 ctso csc
+.
+
+Theorem drf_guarantee :
+  forall c0 ctso,
+    data_race_free c0 ->
+    c0 -->* ctso ->
+    exists csc, simulation c0 ctso csc.
 
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
