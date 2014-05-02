@@ -2338,7 +2338,26 @@ Lemma unlock_context_invariance_mem :
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l)) [[EV_Unlock l]] ->
     t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (unlock lks l)) [[EV_Unlock l]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem (unlock lks l)) as st2.
+  remember (EV_Unlock l) as evt.
+  generalize dependent l; generalize dependent lks;
+  generalize dependent mem'; generalize dependent mem;
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inversion Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+  Case "SC_SeqStep".
+    subst...
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+Qed.
 
 Lemma unlock_context_invariance_lks_less :
   forall t c c' mem lks l1 l2 v2,
@@ -2347,7 +2366,27 @@ Lemma unlock_context_invariance_lks_less :
         (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]] ->
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l1)) [[EV_Unlock l1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem (lks_update lks l2 v2)) as st1.
+  remember (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) as st2.
+  remember (EV_Unlock l1) as evt.
+  generalize dependent c'; generalize dependent c;
+  generalize dependent mem; generalize dependent lks;
+  generalize dependent l1; generalize dependent l2;
+  generalize dependent v2.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_Unlock".
+    rewrite -> lks_update_neq in H...
+Qed.
 
 Lemma unlock_context_invariance_lks_more :
   forall t c c' mem lks l1 l2 v2,
@@ -2356,7 +2395,32 @@ Lemma unlock_context_invariance_lks_more :
     t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
          (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem (unlock lks l1)) as st2.
+  remember (EV_Unlock l1) as evt.
+  generalize dependent c'; generalize dependent c;
+  generalize dependent mem; generalize dependent lks;
+  generalize dependent l1; generalize dependent l2;
+  generalize dependent v2.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inversion Heqst2.
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inversion H.
+    inversion H2; inversion H5.
+  Case "SC_SeqStep".
+    subst...
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inversion H.
+    inversion H2; inversion H5.
+  Case "SC_Unlock".
+    subst...
+    constructor.
+    rewrite -> lks_update_neq...
+Qed.
+
 
 Lemma none_context_invariance :
   forall t c c' mem mem' lks lks',
