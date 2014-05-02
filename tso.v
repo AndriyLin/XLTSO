@@ -102,70 +102,72 @@ Definition memory : Type := var -> nat.
 
 Definition empty_memory : memory := fun _ => 0.
 
-Definition update (mem : memory) (x : var) (n : nat) : memory :=
+Definition mem_update (mem : memory) (x : var) (n : nat) : memory :=
   fun x' => if eq_var_dec x x' then n else mem x'.
 
-Hint Unfold update.
+Hint Unfold mem_update.
 
-Theorem update_eq :
-  forall n x mem, (update mem x n) x = n.
+Theorem mem_update_eq :
+  forall n x mem, (mem_update mem x n) x = n.
 Proof with auto.
   intros.
-  unfold update...
+  unfold mem_update...
 Qed.
 
-Hint Resolve update_eq.
+Hint Resolve mem_update_eq.
 
-Theorem update_neq :
+Theorem mem_update_neq :
   forall x2 x1 n mem,
-    x2 <> x1 -> (update mem x2 n) x1 = (mem x1).
+    x2 <> x1 -> (mem_update mem x2 n) x1 = (mem x1).
 Proof with auto.
   intros.
-  unfold update...
+  unfold mem_update...
 Qed.
 
-Hint Resolve update_neq.
+Hint Resolve mem_update_neq.
 
 (* Due to most recent assignment, previous assignments are shadowed. *)
-Theorem update_shadow :
+Theorem mem_update_shadow :
   forall n1 n2 x1 x2 (mem : memory),
-    (update (update mem x2 n1) x2 n2) x1 = (update mem x2 n2) x1.
+    (mem_update (mem_update mem x2 n1) x2 n2) x1 = (mem_update mem x2 n2) x1.
 Proof with auto.
   intros.
-  unfold update...
+  unfold mem_update...
   destruct (eq_var_dec x2 x1)...
 Qed.
 
-Hint Resolve update_shadow.
+Hint Resolve mem_update_shadow.
 
 (* Update a variable to its current value won't "actually" change the state *)
-Theorem update_same : forall n1 x1 x2 (mem : memory),
-                        mem x1 = n1 ->
-                        (update mem x1 n1) x2 = mem x2.
+Theorem mem_update_same :
+  forall n1 x1 x2 (mem : memory),
+    mem x1 = n1 ->
+    (mem_update mem x1 n1) x2 = mem x2.
 Proof with auto.
   intros.
-  unfold update...
+  unfold mem_update...
   destruct (eq_var_dec x1 x2);
     subst...
 Qed.
 
-Hint Resolve update_same.
+Hint Resolve mem_update_same.
 
 (* The order of update doesn't matter *)
-Theorem update_permute :
+Theorem mem_update_permute :
   forall n1 n2 x1 x2 x3 mem,
     x2 <> x1 -> 
-    (update (update mem x2 n1) x1 n2) x3 = (update (update mem x1 n2) x2 n1) x3.
+    (mem_update (mem_update mem x2 n1) x1 n2) x3 =
+    (mem_update (mem_update mem x1 n2) x2 n1) x3.
 Proof with auto.
   intros.
-  unfold update...
+  unfold mem_update...
   destruct (eq_var_dec x1 x3)...
   Case "x1 = x3".
     destruct (eq_var_dec x2 x3); subst...
     apply ex_falso_quodlibet...
 Qed.
 
-Hint Resolve update_permute.
+Hint Resolve mem_update_permute.
 (* ---------------- end of Memory ---------------- *)
 
 
@@ -882,7 +884,7 @@ Inductive ststep : tid -> state -> state -> event -> Prop :=
 | ST_FlushOne : forall t buf mem lks x n c,
                   (* Here it's defined as "it can flush no matter blocked or not" *)
                   oldest buf = Some (x, n) ->
-                  t @ (ST c buf mem lks) ==> (ST c (flushone buf) (update mem x n) lks)
+                  t @ (ST c buf mem lks) ==> (ST c (flushone buf) (mem_update mem x n) lks)
                     [[EV_None]]
 
 (* to LOCK, buffer must be empty *)
@@ -936,7 +938,7 @@ Proof with eauto.
     destruct buf...
     right.
     destruct p.
-    exists (ST SKIP buf (update mem v n) lks); exists EV_None...
+    exists (ST SKIP buf (mem_update mem v n) lks); exists EV_None...
     apply ST_FlushOne...
   Case "::=".
     right; destruct (strong_progress_a a buf mem)...
@@ -1008,7 +1010,7 @@ Proof with auto.
   remember ([(X, 100)]) as buf.
   remember (ST c buf empty_memory empty_locks) as st.
   remember (ST SKIP buf empty_memory empty_locks) as st1.
-  remember (ST c nil (update empty_memory X 100) empty_locks) as st2.
+  remember (ST c nil (mem_update empty_memory X 100) empty_locks) as st2.
   remember EV_None as evt1.
   remember EV_None as evt2.
   assert (T0 @ st ==> st1 [[evt1]]).
@@ -1332,7 +1334,7 @@ Reserved Notation "t '@' st1 '==SC>' st2 '[[' evt ']]'" (at level 80).
 Inductive sc : tid -> state -> state -> event -> Prop :=
 | SC_Ass : forall t x n mem lks,
              t @ (ST (x ::= ANum n) nil mem lks) ==SC>
-                 (ST SKIP nil (update mem x n) lks) [[EV_Write x n]]
+                 (ST SKIP nil (mem_update mem x n) lks) [[EV_Write x n]]
 | SC_AssStep : forall t x a a' mem lks evt,
                  a /- nil ~ mem ==A> a' [[evt]] ->
                  t @ (ST (x ::= a) nil mem lks) ==SC> (ST (x ::= a') nil mem lks) [[evt]]
@@ -1817,7 +1819,8 @@ Lemma read_context_invariance:
   forall t c mem lks c' x1 x2 n,
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]] ->
     x1 <> x2 ->
-    t @ (ST c [] (update mem x2 n) lks) ==SC> (ST c' [] (update mem x2 n) lks) [[EV_Read x1]].
+    t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
+        (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]].
 Proof with eauto.
   Admitted.
 
@@ -1838,7 +1841,7 @@ Proof with auto.
 Lemma sc_event_write :
   forall t c c' mem lks mem' lks' x n,
     t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[EV_Write x n]] ->
-    mem' = update mem x n /\ lks = lks'.
+    mem' = mem_update mem x n /\ lks = lks'.
 Proof with eauto.
   intros.
   remember (ST c nil mem lks) as st1.
@@ -1921,10 +1924,10 @@ Proof with eauto.
           destruct (eq_var_dec x x0); subst.
           assert (conflict (EV_Read x0) (EV_Write x0 n)) by auto.
           apply Hcfl in H; invf H.
-          assert (mem'0 = update mem' x0 n /\ lks' = lks'0).
+          assert (mem'0 = mem_update mem' x0 n /\ lks' = lks'0).
             eapply sc_event_write; apply H11.
           inv H.
-          exists (CFG tids (override thds t2 c'0 []) (update mem' x0 n) lks'0); split.
+          exists (CFG tids (override thds t2 c'0 []) (mem_update mem' x0 n) lks'0); split.
           apply CFGSC_One with c0...
           unfold override in H10; rewrite neq_tid in H10...
           rewrite -> override_permute.
