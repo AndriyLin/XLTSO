@@ -1999,6 +1999,16 @@ Fixpoint flattening (cfg : configuration) : configuration :=
       CFG tids thds bufs (_flattening tids bufs mem) lks
   end.
 
+Lemma flattening_empty_buffers :
+  forall ts mem, _flattening ts empty_buffers mem = mem.
+Proof with auto.
+  intros ts.
+  induction ts as [ | hd tl];
+    intros; simpl...
+Qed.
+
+Hint Resolve flattening_empty_buffers.
+
 
 Inductive simulation : configuration -> configuration -> configuration -> Prop :=
 | Simulation : forall c0 ctso csc tr1 tr2,
@@ -2012,12 +2022,28 @@ Hint Constructors simulation.
 
 
 Theorem drf_guarantee :
-  forall c0 ctso tr,
-    data_race_free c0 ->
-    c0 -->* ctso [[tr]]->
-    exists csc, simulation c0 ctso csc.
+  forall cfg ctso tr tids thds,
+    (* start from initial state *)
+    cfg = CFG tids thds empty_buffers empty_memory empty_locks ->
+    data_race_free cfg ->
+    cfg -->* ctso [[tr]]->
+    exists csc, simulation cfg ctso csc.
 Proof with eauto.
-  
+  intros cfg ctso tr tids thds Hcfg Hdrf Htso.
+  generalize dependent thds; generalize dependent tids.
+  revert Hdrf.
+  multi_cases (induction Htso) Case;
+    intros.
+  Case "multi_refl".
+    rename x into cfg.
+    exists (flattening cfg).
+    inv Hcfg; inv H; simpl; rewrite -> flattening_empty_buffers.
+    apply Simulation with [] [].
+    apply multi_refl...
+    apply multi_refl...
+    simpl; rewrite -> flattening_empty_buffers...
+  Case "multi_step".
+    (* TODO: Resume here *)
 Qed.
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
