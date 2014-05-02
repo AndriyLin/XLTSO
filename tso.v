@@ -876,13 +876,25 @@ Hint Constructors state.
 
 
 Inductive waiting : tid -> state -> Prop :=
-| WaitingLock : forall t t' lks l mem,
-                lks l = Some t' ->
-                t <> t' ->
-                waiting t (ST (LOCK l) nil mem lks)
-| WaitingSeq : forall t buf mem lks c1 c2,
-               waiting t (ST c1 buf mem lks) ->
-               waiting t (ST (c1 ;; c2) buf mem lks)
+| WT_Lock :
+    forall t t' lks l mem,
+      lks l = Some t' ->
+      (* At first, I require t <> t', but for simplicity, one thread
+      cannot acquire one lock twice! *)
+      waiting t (ST (LOCK l) nil mem lks)
+| WT_UnlockNone :
+    forall t lks l mem,
+      lks l = None ->
+      waiting t (ST (UNLOCK l) nil mem lks)
+| WT_UnlockOthers :
+    forall t1 t2 lks l mem,
+      lks l = Some t2 ->
+      t1 <> t2 ->
+      waiting t1 (ST (UNLOCK l) nil mem lks)
+| WaitingSeq :
+    forall t buf mem lks c1 c2,
+      waiting t (ST c1 buf mem lks) ->
+      waiting t (ST (c1 ;; c2) buf mem lks)
 .
 
 Hint Constructors waiting.
@@ -936,28 +948,15 @@ Inductive ststep : tid -> state -> state -> event -> Prop :=
                   t @ (ST c buf mem lks) ==> (ST c (flushone buf) (mem_update mem x n) lks)
                     [[EV_None]]
 
-(* to LOCK, buffer must be empty *)
+(* to LOCK/UNLOCK, buffer must be empty *)
 | ST_Lock : forall t mem lks lk,
               lks lk = None ->
               t @ (ST (LOCK lk) nil mem lks) ==>
                 (ST SKIP nil mem (lock lks t lk)) [[EV_Lock lk]]
-| ST_LockAgain : forall t mem lks lk,
-                   lks lk = Some t ->
-                   t @ (ST (LOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
-
-(* to UNLOCK, buffer must be empty *)
 | ST_Unlock : forall t mem lks lk,
                 lks lk = Some t ->
                 t @ (ST (UNLOCK lk) nil mem lks) ==>
                   (ST SKIP nil mem (unlock lks lk)) [[EV_Unlock lk]]
-| ST_UnlockNil : forall t mem lks lk,
-                   lks lk = None ->
-                   t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
-| ST_UnlockOthers : forall t t' mem lks lk,
-                      lks lk = Some t' ->
-                      t <> t' ->
-                      t @ (ST (UNLOCK lk) nil mem lks) ==> (ST SKIP nil mem lks) [[EV_None]]
-
 
 where "t1 '@' st1 '==>' st2 '[[' evt ']]'" := (ststep t1 st1 st2 evt).
 
@@ -969,9 +968,8 @@ Tactic Notation "ststep_cases" tactic(first) ident(c) :=
   | Case_aux c "ST_Seq" | Case_aux c "ST_SeqStep"
   | Case_aux c "ST_IfTrue" | Case_aux c "ST_IfFalse"
   | Case_aux c "ST_IfStep" | Case_aux c "ST_While"
-  | Case_aux c "ST_FlushOne" | Case_aux c "ST_Lock"
-  | Case_aux c "ST_LockAgain" | Case_aux c "ST_Unlock"
-  | Case_aux c "ST_UnlockNil" | Case_aux c "ST_UnlockOthers"
+  | Case_aux c "ST_FlushOne"
+  | Case_aux c "ST_Lock" | Case_aux c "ST_Unlock"
   ].
 
 
@@ -1016,33 +1014,13 @@ Proof with eauto.
   Case "UNLOCK".
     destruct buf...
     SCase "empty buffer".
-      right; destruct (lks l) eqn:Hl...
+      destruct (lks l) eqn:Hl...
       destruct (eq_tid_dec t t0); subst...
     SCase "non-empty buffer".
       right; destruct p.
       eexists; eexists.
       apply ST_FlushOne...
       simpl...
-Qed.
-
-
-(* When a thread get stuck, it can resume when that lock is released *)
-Theorem thread_stuck_resume:
-  forall t l buf mem lks lks',
-    st_normal_form t (ST (LOCK l) buf mem lks) ->
-    lks' l = None \/ lks' l = Some t ->
-    exists st' evt, t @ (ST (LOCK l) buf mem lks') ==> st' [[evt]].
-Proof.
-  intros.
-  inv H.
-  inv H1.
-  inv H0.
-  Case "no one holding the lock".
-    eexists; eexists.
-    apply ST_Lock; assumption.
-  Case "self holding the lock".
-    eexists; eexists.
-    apply ST_LockAgain; assumption.
 Qed.
 
 
@@ -1432,22 +1410,10 @@ Inductive sc : tid -> state -> state -> event -> Prop :=
               lks lk = None ->
               t @ (ST (LOCK lk) nil mem lks) ==SC>
                 (ST SKIP nil mem (lock lks t lk)) [[EV_Lock lk]]
-| SC_LockAgain : forall t mem lks lk,
-                   lks lk = Some t ->
-                   t @ (ST (LOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
-
 | SC_Unlock : forall t mem lks lk,
                 lks lk = Some t ->
                 t @ (ST (UNLOCK lk) nil mem lks) ==SC>
                   (ST SKIP nil mem (unlock lks lk)) [[EV_Unlock lk]]
-| SC_UnlockNil : forall t mem lks lk,
-                   lks lk = None ->
-                   t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
-| SC_UnlockOthers : forall t t' mem lks lk,
-                      lks lk = Some t' ->
-                      t <> t' ->
-                      t @ (ST (UNLOCK lk) nil mem lks) ==SC> (ST SKIP nil mem lks) [[EV_None]]
-
 
 where "t1 '@' st1 '==SC>' st2 '[[' evt ']]'" := (sc t1 st1 st2 evt).
 
@@ -1459,8 +1425,7 @@ Tactic Notation "sc_cases" tactic(first) ident(c) :=
   | Case_aux c "SC_Seq" | Case_aux c "SC_SeqStep"
   | Case_aux c "SC_IfTrue" | Case_aux c "SC_IfFalse"
   | Case_aux c "SC_IfStep" | Case_aux c "SC_While"
-  | Case_aux c "SC_Lock" | Case_aux c "SC_LockAgain"
-  | Case_aux c "SC_Unlock" | Case_aux c "SC_UnlockNil" | Case_aux c "SC_UnlockOthers"
+  | Case_aux c "SC_Lock" | Case_aux c "SC_Unlock"
   ].
 
 
@@ -1502,7 +1467,7 @@ Proof with eauto.
     destruct (eq_tid_dec t t0); subst...
     right...
   Case "UNLOCK".
-    right; destruct (lks l) eqn:Hl...
+    destruct (lks l) eqn:Hl...
     destruct (eq_tid_dec t t0); subst...
 Qed.
 
@@ -1547,22 +1512,8 @@ Proof with eauto.
     inv H2...
   Case "SC_Lock".
     inv H2...
-    rewrite -> H in H7; invf H7.
-  Case "SC_LockAgain".
-    inv H2...
-    rewrite -> H in H7; invf H7.
   Case "SC_Unlock".
     inv H2...
-    rewrite -> H in H7; invf H7.
-    rewrite -> H in H7; invf H7.
-    assert (t' = t') as Hf by auto; apply H8 in Hf; invf Hf.
-  Case "SC_UnlockNil".
-    inv H2...
-    rewrite -> H in H7; invf H7.
-  Case "SC_UnlockOthers".
-    inv H2...
-    rewrite -> H in H8; invf H8.
-    assert (t = t) as Hf by auto; apply H0 in Hf; invf Hf.
 Qed.
 
 
@@ -2057,7 +2008,7 @@ steps are by executing a thread:
   this event in a slightly different context.
 *)
 
-Lemma astep_context_invariance_more :
+Lemma astep_read_context_invariance_more :
   forall a a' x1 x2 n buf mem,
     x1 <> x2 ->
     a /- buf ~ mem ==A> a' [[EV_Read x1]] ->
@@ -2073,9 +2024,9 @@ Proof with eauto.
     replace (m x1) with (mem_update m x2 n x1)...
 Qed.
 
-Hint Resolve astep_context_invariance_more.
+Hint Resolve astep_read_context_invariance_more.
 
-Lemma astep_context_invariance_less :
+Lemma astep_read_context_invariance_less :
   forall a a' x1 x2 n buf mem,
     x1 <> x2 ->
     a /- buf ~ (mem_update mem x2 n) ==A> a' [[EV_Read x1]] ->
@@ -2093,9 +2044,9 @@ Proof with eauto.
     rewrite -> mem_update_neq...
 Qed.
 
-Hint Resolve astep_context_invariance_less.
+Hint Resolve astep_read_context_invariance_less.
 
-Lemma bstep_context_invariance_more :
+Lemma bstep_read_context_invariance_more :
   forall b b' x1 x2 n buf mem,
     x1 <> x2 ->
     b /- buf ~ mem ==B> b' [[EV_Read x1]] ->
@@ -2109,9 +2060,9 @@ Proof with eauto.
     intros; inversion Heqevt; subst; eauto.
 Qed.
 
-Hint Resolve bstep_context_invariance_more.
+Hint Resolve bstep_read_context_invariance_more.
 
-Lemma bstep_context_invariance_less :
+Lemma bstep_read_context_invariance_less :
   forall b b' x1 x2 n buf mem,
     x1 <> x2 ->
     b /- buf ~ (mem_update mem x2 n) ==B> b' [[EV_Read x1]] ->
@@ -2126,7 +2077,7 @@ Proof with eauto.
     intros; inversion Heqevt; subst; eauto.
 Qed.
 
-Hint Resolve bstep_context_invariance_less.
+Hint Resolve bstep_read_context_invariance_less.
 
 
 (* If thread is about to read variable x, then change another value in
@@ -2150,13 +2101,13 @@ Proof with eauto.
     intros; inversion Heqevt; inv Heqst1; inv Heqst2.
   Case "SC_AssStep".
     constructor.
-    apply astep_context_invariance_more...
+    apply astep_read_context_invariance_more...
   Case "SC_SeqStep".
     constructor.
     apply IHsc with x1...
   Case "SC_IfStep".
     constructor.
-    apply bstep_context_invariance_more...
+    apply bstep_read_context_invariance_more...
 Qed.
 
 Hint Resolve read_context_invariance_mem_more.
@@ -2180,13 +2131,13 @@ Proof with eauto.
     intros; inversion Heqevt; inv Heqst1; inv Heqst2.
   Case "SC_AssStep".
     constructor.
-    eapply astep_context_invariance_less...
+    eapply astep_read_context_invariance_less...
   Case "SC_SeqStep".
     constructor.
     eapply IHsc...
   Case "SC_IfStep".
     constructor.
-    eapply bstep_context_invariance_less...
+    eapply bstep_read_context_invariance_less...
 Qed.
 
 Hint Resolve read_context_invariance_mem_less.
@@ -2422,14 +2373,49 @@ Proof with eauto.
 Qed.
 
 
+Lemma astep_none_context_invariance :
+  forall a a' buf mem mem',
+    a /- buf ~ mem ==A> a' [[EV_None]] ->
+    a /- buf ~ mem' ==A> a' [[EV_None]].
+Proof with eauto.
+  intros.
+  remember EV_None as evt.
+  generalize dependent mem'.
+  astep_cases (induction H) Case;
+    intros; inversion Heqevt; subst; eauto.
+Qed.
+
+Hint Resolve astep_none_context_invariance.
+
+Lemma bstep_none_context_invariance :
+  forall b b' buf mem mem',
+    b /- buf ~ mem ==B> b' [[EV_None]] ->
+    b /- buf ~ mem' ==B> b' [[EV_None]].
+Proof with eauto.
+  intros.
+  remember EV_None as evt.
+  generalize dependent mem'.
+  bstep_cases (induction H) Case;
+    intros; inversion Heqevt; subst; eauto.
+Qed.
+
+Hint Resolve bstep_none_context_invariance.
+
 Lemma none_context_invariance :
   forall t c c' mem mem' lks lks',
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_None]] ->
     t @ (ST c [] mem' lks') ==SC> (ST c' [] mem' lks') [[EV_None]].
 Proof with eauto.
-(* TODO: this lemma I am not 100% sure *)
-  Admitted.
-
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem lks) as st2.
+  remember EV_None as evt.
+  generalize dependent c; generalize dependent c';
+  generalize dependent mem; generalize dependent mem';
+  generalize dependent lks; generalize dependent lks'.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+Qed.
 
 (* end of all lemmas for:
 
@@ -2528,8 +2514,7 @@ case is not hard. It's just time-consuming!
           inv H.
           exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x0 n) lks'0); split.
           rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)...
-          apply read_context_invariance_mem_more... auto.
+          apply CFGSC_One with (thds t1)... auto.
 
         SSSCase "EV_Lock". (* evt1 : Read / evt2 : Lock *)
           assert (mem' = mem'0 /\ lks'0 = lock lks' t2 l).
@@ -2575,8 +2560,7 @@ case is not hard. It's just time-consuming!
           inv H.
           exists (CFG tids (thds_update thds t2 c'0) bufs mem lks'0); split.
           rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)...
-          eapply read_context_invariance_mem_less... auto.
+          apply CFGSC_One with (thds t2)... auto.
           apply CFGSC_One with (thds t1)... auto.
 
         SSSCase "EV_Write". (* evt1 : Write / evt2 : Write *)
