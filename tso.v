@@ -1984,46 +1984,43 @@ Admitted.
 Fixpoint _flushall (b : buffer) (m : memory) : memory :=
   match b with
     | nil => m
-    | (x, n) :: t => _flushall t (update m x n)
+    | (x, n) :: t => _flushall t (mem_update m x n)
   end.
 
-Fixpoint _flattening (ts : list tid) (thds : threads) (m : memory) : memory :=
+Fixpoint _flattening (ts : list tid) (bufs : buffer_status) (m : memory) : memory :=
   match ts with
     | nil => m
-    | t :: ts' => match thds t with
-                    | (_, b) => _flattening ts' thds (_flushall b m)
-                  end
+    | t :: ts' => _flattening ts' bufs (_flushall (bufs t) m)
   end.
-
 
 Fixpoint flattening (cfg : configuration) : configuration :=
   match cfg with
-    | CFG tids thds mem lks =>
-      CFG tids
+    | CFG tids thds bufs mem lks =>
+      CFG tids thds bufs (_flattening tids bufs mem) lks
   end.
-
-Inductive flattening : configuration -> configuration -> Prop :=
-| 
-.
 
 
 Inductive simulation : configuration -> configuration -> configuration -> Prop :=
-| Simulation : forall c0 ctso csc,
-                 c0 -->* ctso ->
-                 c0 --SC>* csc ->
-                 flattening ctso csc ->
+| Simulation : forall c0 ctso csc tr1 tr2,
+                 c0 -->* ctso [[tr1]] ->
+                 c0 --SC>* csc [[tr2]] ->
+                 flattening ctso = csc ->
                  simulation c0 ctso csc
 .
 
+Hint Constructors simulation.
+
+
 Theorem drf_guarantee :
-  forall c0 ctso,
+  forall c0 ctso tr,
     data_race_free c0 ->
-    c0 -->* ctso ->
+    c0 -->* ctso [[tr]]->
     exists csc, simulation c0 ctso csc.
-
-
-
+Proof with eauto.
+  
+Qed.
 (* ---------------- end of DRF Guarantee Property ---------------- *)
+
 
 (* ---------------- ?? ---------------- *)
 Theorem drf_must_have_unlock :
