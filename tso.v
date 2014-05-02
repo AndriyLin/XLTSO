@@ -306,6 +306,18 @@ Definition empty_locks : lock_status :=
 Definition lks_update (st : lock_status) (l : lid) (v : option tid) : lock_status :=
   fun l' => if eq_lid_dec l l' then v else st l'.
 
+
+Theorem lks_update_neq :
+  forall l1 l2 v lks,
+    l2 <> l1 -> (lks_update lks l2 v) l1 = (lks l1).
+Proof with auto.
+  intros.
+  unfold lks_update...
+Qed.
+
+Hint Resolve lks_update_neq.
+
+
 Theorem lks_update_permute :
   forall st l1 l2 v1 v2,
     l1 <> l2 ->
@@ -2237,7 +2249,26 @@ Lemma lock_context_invariance_mem :
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l)) [[EV_Lock l]] ->
     t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (lock lks t l)) [[EV_Lock l]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem (lock lks t l)) as st2.
+  remember (EV_Lock l) as evt.
+  generalize dependent l; generalize dependent lks;
+  generalize dependent mem'; generalize dependent mem;
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inversion Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+  Case "SC_SeqStep".
+    subst...
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+Qed.
 
 Lemma lock_context_invariance_lks_less :
   forall t c c' mem lks l1 l2 v2,
@@ -2246,7 +2277,27 @@ Lemma lock_context_invariance_lks_less :
         (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]] ->
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l1)) [[EV_Lock l1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem (lks_update lks l2 v2)) as st1.
+  remember (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) as st2.
+  remember (EV_Lock l1) as evt.
+  generalize dependent c'; generalize dependent c;
+  generalize dependent mem; generalize dependent lks;
+  generalize dependent l1; generalize dependent l2;
+  generalize dependent v2.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_Lock".
+    rewrite -> lks_update_neq in H...
+Qed.
 
 Lemma lock_context_invariance_lks_more :
   forall t c c' mem lks l1 l2 v2,
@@ -2255,7 +2306,32 @@ Lemma lock_context_invariance_lks_more :
     t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
          (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem (lock lks t l1)) as st2.
+  remember (EV_Lock l1) as evt.
+  generalize dependent c'; generalize dependent c;
+  generalize dependent mem; generalize dependent lks;
+  generalize dependent l1; generalize dependent l2;
+  generalize dependent v2.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inversion Heqst2.
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inversion H.
+    inversion H2; inversion H5.
+  Case "SC_SeqStep".
+    subst...
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inversion H.
+    inversion H2; inversion H5.
+  Case "SC_Lock".
+    subst...
+    constructor.
+    rewrite -> lks_update_neq...
+Qed.
+
 
 Lemma unlock_context_invariance_mem :
   forall t c c' mem mem' lks l,
