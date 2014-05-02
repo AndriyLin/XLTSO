@@ -32,6 +32,7 @@ Structure:
 * Proof of TSO Semantics
 * Sequential Consistency Semantics
 * Data-Race-Free
+* Diamond Lemma
 * DRF Guarantee Property
 * TODO.. More?
 *)
@@ -1043,6 +1044,22 @@ Definition override (ts: threads) (t : tid) (c : cmd) (b : buffer) :=
 
 Hint Unfold override.
 
+Theorem override_permute :
+  forall ts t1 c1 b1 t2 c2 b2,
+    t1 <> t2 ->
+    override (override ts t1 c1 b1) t2 c2 b2 = override (override ts t2 c2 b2) t1 c1 b1.
+Proof with auto.
+  intros.
+  apply functional_extensionality.
+  intros t.
+  unfold override.
+  destruct (eq_tid_dec t2 t)...
+  destruct (eq_tid_dec t1 t)...
+  subst.
+  assert (t = t) by auto.
+  apply H in H0; invf H0.
+Qed.
+
 
 (* configuration contains everything that may be modified, for all threads *)
 Record configuration := CFG {
@@ -1626,23 +1643,314 @@ Hint Resolve drf_preservation.
 (* ---------------- end of Data-Race-Free ---------------- *)
 
 
-(* ---------------- DRF Guarantee Property ---------------- *)
-(* This section is to prove that "data race free programs have SC semantics" *)
+(* ---------------- Diamond Lemma ---------------- *)
+(* Whether 2 consecutive events of different tids in a trace can not
+be simply swapped.  LOCK & UNLOCK are considered to be "write"
+operations. *)
+Inductive conflict : event -> event -> Prop :=
+| CFL_WrWr : forall x n1 n2,
+               conflict (EV_Write x n1) (EV_Write x n2)
+| CFL_WrRd : forall x n,
+               conflict (EV_Write x n) (EV_Read x)
+| CFL_RdWr : forall x n,
+               conflict (EV_Read x) (EV_Write x n)
+| CFL_LkLk : forall l,
+               conflict (EV_Lock l) (EV_Lock l)
+| CFL_LkUn : forall l,
+               conflict (EV_Lock l) (EV_Unlock l)
+| CFL_UnLk : forall l,
+               conflict (EV_Unlock l) (EV_Lock l)
+| CFL_UnUn : forall l,
+               conflict (EV_Unlock l) (EV_Unlock l)
+.
 
-(* I find it hard to write down the theorems using my current data structures,
-so I have to refine my definitions first. *)
+Hint Constructors conflict.
 
-(* data-race is defined on 2 commands. Because events must have a
-order between them, so conflicts should be defined in terms of
-events. but has the same meaning as data-race.  *)
+Tactic Notation "conflict_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "CFL_WrWr" | Case_aux c "CFL_WrRd"
+  | Case_aux c "CFL_RdWr"
+  | Case_aux c "CFL_LkLk" | Case_aux c "CFL_LkUn"
+  | Case_aux c "CFL_UnLk" | Case_aux c "CFL_UnUn"
+  ].
+
+
+(* When removing 2 tids, it doesn't matter which one is removed first. *)
+Lemma remove_order_independent :
+  forall tids t1 t2,
+    remove_tid t2 (remove_tid t1 tids) = remove_tid t1 (remove_tid t2 tids).
+Proof with auto.
+  intros tids.
+  induction tids as [ | hd tl];
+    intros; simpl...
+  Case "tids = hd :: tl".
+  destruct (eq_tid_dec t1 hd) eqn:Ht1hd; subst.
+  SCase "t1 = hd".
+    destruct (eq_tid_dec t2 hd) eqn:Ht2hd; subst...
+    SSCase "t2 <> hd".
+    simpl; rewrite -> eq_tid...
+  SCase "t1 <> hd".
+    destruct (eq_tid_dec t2 hd) eqn:Ht2hd; subst...
+    SSCase "t2 = hd".
+      simpl; rewrite -> eq_tid...
+    SSCase "t2 <> hd".
+      simpl; rewrite -> Ht1hd; rewrite -> Ht2hd.
+      rewrite -> IHtl...
+Qed.
+
+Hint Resolve remove_order_independent.
+
+(* Removing a tid won't affect the result of in_tids t' when t <> t' *)
+Lemma remove_irrelevant :
+  forall tids t1 t2,
+    t1 <> t2 ->
+    in_tids t2 tids = in_tids t2 (remove_tid t1 tids).
+Proof with auto.
+  intros.
+  induction tids as [ | hd tl]...
+  simpl.
+  destruct (eq_tid_dec t2 hd) eqn:Ht2hd;
+    destruct (eq_tid_dec t1 hd) eqn:Ht1hd; subst...
+  apply ex_falso_quodlibet; apply H...
+  simpl; rewrite -> eq_tid...
+  simpl; rewrite -> Ht2hd...
+Qed.
+
+Hint Resolve remove_irrelevant.
+
+(* I really don't forsee that this theorem needs to be proved explicitly!! *)
+Lemma list_neq :
+  forall (ts : list tid) (t : tid), ts <> t :: ts.
+Proof with auto.
+  intros ts.
+  induction ts; intros.
+  intros Hf; inversion Hf.
+  intros Hf.
+  inversion Hf.
+  apply IHts in H1.
+  inversion H1.
+Qed.
+
+Hint Resolve list_neq.
+
+(* once something is actually removed from a set, the set is no longer the same as before *)
+Lemma remove_then_neq :
+  forall tids t,
+    in_tids t tids = true ->
+    remove_tid t tids <> tids.
+Proof with auto.
+  intros tids.
+  induction tids as [ | hd tl];
+    intros.
+  Case "tids = nil".
+    inversion H.
+  Case "tids = hd :: tl".
+    simpl.
+    destruct (eq_tid_dec t hd) eqn:Hthd; subst.
+    apply list_neq.
+    intros Hf.
+    inversion Hf.
+    apply IHtl in H1...
+    simpl in H.
+    rewrite -> Hthd in H...
+Qed.
+
+Hint Resolve remove_then_neq.
+
+(* TODO: I used Axiom here because I failed to prove it as a theorem. This will be used in lemma tids_irrelevant! *)
+Axiom override_exact_eq :
+  forall thds t1 c1 t2 c2,
+    override thds t1 c1 [] = override thds t2 c2 [] ->
+    t1 = t2 /\ c1 = c2.
+
+(* Changing to another tid set won't affect the result when the
+executied thread is still in that set *)
+Lemma tids_irrelevant :
+  forall tids tids' thds mem lks t c' mem' lks' evt,
+    (CFG tids thds mem lks) --SC> (CFG tids (override thds t c' []) mem' lks') [[(t, evt)]] ->
+    in_tids t tids' = true ->
+    (CFG tids' thds mem lks) --SC> (CFG tids' (override thds t c' []) mem' lks') [[(t, evt)]].
+Proof with eauto.
+  intros.
+  generalize dependent tids'.
+  remember (CFG tids thds mem lks) as cfg.
+  remember (CFG tids (override thds t c' []) mem' lks') as cfg'.
+  generalize dependent lks; generalize dependent mem.
+  generalize dependent thds; generalize dependent tids.
+  generalize dependent c'; generalize dependent mem';
+  generalize dependent lks'.
+  cfgsc_cases (induction H) Case;
+    intros; inversion Heqcfg; subst; clear Heqcfg; inversion Heqcfg'.
+  Case "CFGSC_Done".
+    assert (remove_tid t0 tids0 <> tids0) by eauto.
+    apply H2 in H3; inversion H3.
+  Case "CFGSC_One".
+    clear Heqcfg'; subst.
+    apply override_exact_eq in H4.
+    inv H4...
+Qed.
+
+Hint Resolve tids_irrelevant.
+
+
+Lemma sc_event_read :
+  forall t c c' mem lks mem' lks' x,
+    t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[EV_Read x]] ->
+    mem = mem' /\ lks = lks'.
+Proof with eauto.
+  intros.
+  remember (ST c nil mem lks) as st1.
+  remember (ST c' nil mem' lks') as st2.
+  remember (EV_Read x) as evt.
+  generalize dependent x;
+  generalize dependent c; generalize dependent c';
+  generalize dependent mem; generalize dependent mem';
+  generalize dependent lks; generalize dependent lks'.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt;
+    inversion Heqst1; inversion Heqst2; subst...
+Qed.
+
+(* If thread is about to read variable x, then change another value in
+the memory won't affect this read *)
+Lemma read_context_invariance:
+  forall t c mem lks c' x1 x2 n,
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]] ->
+    x1 <> x2 ->
+    t @ (ST c [] (update mem x2 n) lks) ==SC> (ST c' [] (update mem x2 n) lks) [[EV_Read x1]].
+Proof with eauto.
+  Admitted.
+
+Lemma astep_event_read_or_none:
+  forall a1 a2 mem evt,
+    a1 /- [] ~ mem ==A> a2 [[evt]] ->
+    exists x, evt = EV_Read x \/ evt = EV_None.
+Proof with auto.
+  Admitted.
+
+Lemma bstep_event_read_or_none:
+  forall b1 b2 mem evt,
+    b1 /- [] ~ mem ==B> b2 [[evt]] ->
+    exists x, evt = EV_Read x \/ evt = EV_None.
+Proof with auto.
+  Admitted.
+
+Lemma sc_event_write :
+  forall t c c' mem lks mem' lks' x n,
+    t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[EV_Write x n]] ->
+    mem' = update mem x n /\ lks = lks'.
+Proof with eauto.
+  intros.
+  remember (ST c nil mem lks) as st1.
+  remember (ST c' nil mem' lks') as st2.
+  remember (EV_Write x n) as evt.
+  generalize dependent n; generalize dependent x;
+  generalize dependent c; generalize dependent c';
+  generalize dependent mem; generalize dependent mem';
+  generalize dependent lks; generalize dependent lks'.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; subst;
+    inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H1; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H1; inv H.
+Qed.
+
 
 Theorem diamond :
-  cfg0 --> cfg1 with t1 ~ evt1 ->
-  cfg1 --> cfg2 with t2 ~ evt2 ->
-  t1 <> t2 ->
-  no conflict(data-race) between evt1 and evt2 ->
-  exists cfg1', cfg0 --> cfg1' with t2 ~ evt2 /\
-                cfg1' --> cfg2 with t1 ~ evt1.
+  forall cfg0 cfg1 cfg2 t1 t2 evt1 evt2,
+    t1 <> t2 ->
+    cfg0 --SC> cfg1 [[(t1, evt1)]] ->
+    cfg1 --SC> cfg2 [[(t2, evt2)]] ->
+    ~ (conflict evt1 evt2) ->
+    exists cfg1', cfg0 --SC> cfg1' [[(t2, evt2)]] /\ cfg1' --SC> cfg2 [[(t1, evt1)]].
+Proof with eauto.
+  intros cfg0 cfg1 cfg2 t1 t2 evt1 evt2 Ht H01 H12 Hcfl.
+  generalize dependent evt2.
+  generalize dependent cfg2.
+  generalize dependent t2.
+  inversion H01;
+    intros; subst.
+  Case "cfg0 --> cfg1 : CFGSC_Done".
+    inversion H12; subst.
+    SCase "cfg1 --> cfg2 : CFGSC_Done".
+      rewrite -> remove_order_independent.
+      exists (CFG (remove_tid t2 tids) thds mem lks); split.
+      constructor...
+      constructor.
+      rewrite <- remove_irrelevant...
+      auto.
+    SCase "cfg1 --> cfg2 : CFGSC_One".
+      exists (CFG tids (override thds t2 c' []) mem' lks'); split.
+      apply tids_irrelevant with (remove_tid t1 tids); auto.
+      rewrite <- H6; apply remove_irrelevant; auto.
+      constructor...
+      unfold override; rewrite -> neq_tid...
+  Case "cfg0 --> cfg1 : CFGSC_One".
+    inversion H12; subst.
+    SCase "cfg1 --> cfg2 : CFGSC_Done".
+      exists (CFG (remove_tid t2 tids) thds mem lks); split.
+      constructor...
+      unfold override in H10; rewrite -> neq_tid in H10...
+      apply tids_irrelevant with tids; auto.
+      rewrite <- H1; symmetry; apply remove_irrelevant...
+    SCase "cfg1 --> cfg2 : CFGSC_One".
+    (* Both threads do make a step forward *)
+      event_cases (induction evt1) SSCase.
+      SSCase "EV_Read".
+        assert (mem = mem' /\ lks = lks').
+          eapply sc_event_read; apply H5.
+        inv H.
+        event_cases (induction evt2) SSSCase.
+        SSSCase "EV_Read".
+          assert (mem' = mem'0 /\ lks' = lks'0).
+            eapply sc_event_read; apply H11.
+          inv H.
+          exists (CFG tids (override thds t2 c'0 []) mem'0 lks'0); split.
+          apply CFGSC_One with c0...
+          unfold override in H10; rewrite neq_tid in H10...
+          rewrite -> override_permute.
+          apply CFGSC_One with c...
+          unfold override; rewrite neq_tid... auto.
+        SSSCase "EV_Write".
+          destruct (eq_var_dec x x0); subst.
+          assert (conflict (EV_Read x0) (EV_Write x0 n)) by auto.
+          apply Hcfl in H; invf H.
+          assert (mem'0 = update mem' x0 n /\ lks' = lks'0).
+            eapply sc_event_write; apply H11.
+          inv H.
+          exists (CFG tids (override thds t2 c'0 []) (update mem' x0 n) lks'0); split.
+          apply CFGSC_One with c0...
+          unfold override in H10; rewrite neq_tid in H10...
+          rewrite -> override_permute.
+          apply CFGSC_One with c...
+          unfold override; rewrite -> neq_tid...
+          apply read_context_invariance... auto.
+        SSSCase "EV_Lock".
+
+(* TODO:
+Too many cases!! I only solved t1-Read / t2-Read and t1-Read/t2-Write
+for now. I don't have time to finish this proof right now. I will it
+when I have time. The idea is simple:
+
+Generate a Rd event means: mem' = mem /\ lks' = lks
+Generate a Wr event means: mem' = update mem x n /\ lks' = lks
+Generate a Lk event means: mem' = mem /\ lks' = lock lks t lk
+Generate a Un event means: mem' = mem /\ lks' = unlock lks lk
+
+To achieve the same final state, memory & locks must be the same
+threads can be the same by override_permute lemma
+tids won't change when both thread chooses to CFGSC_One, i.e. a small step
+
+So I can foresee the whole proof, it's just a matter of time.
+*)
+Admitted.
+(* ---------------- end of Diamond Lemma ---------------- *)
 
 
 Theorem drf_must_have_unlock :
@@ -1671,6 +1979,11 @@ Theorem drf_guarantee :
     data_race_free c0 ->
     c0 -->* ctso ->
     exists csc, simulation c0 ctso csc.
+
+(* ---------------- DRF Guarantee Property ---------------- *)
+(* This section is to prove that "data race free programs have SC semantics" *)
+
+
 
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
