@@ -1953,18 +1953,33 @@ Admitted.
 (* ---------------- end of Diamond Lemma ---------------- *)
 
 
-Theorem drf_must_have_unlock :
-  cfg -->* cfg' with a list of evts ->
-  in that list, (t1, evt1) < (t2, evt2) ->
-  evt1 and evt2 have data-race ->
-  exists (t1, unlock) between (t1, evt1) and (t2, evt2) in the list.
-(* Gustavo didn't prove this, so he's not sure about the difficulty,
-if hard, make this an axiom. *)
+(* ---------------- DRF Guarantee Property ---------------- *)
+(* This is the ultimate theorem: "data race free programs have SC semantics" *)
+Fixpoint _flushall (b : buffer) (m : memory) : memory :=
+  match b with
+    | nil => m
+    | (x, n) :: t => _flushall t (update m x n)
+  end.
 
+Fixpoint _flattening (ts : list tid) (thds : threads) (m : memory) : memory :=
+  match ts with
+    | nil => m
+    | t :: ts' => match thds t with
+                    | (_, b) => _flattening ts' thds (_flushall b m)
+                  end
+  end.
+
+
+Fixpoint flattening (cfg : configuration) : configuration :=
+  match cfg with
+    | CFG tids thds mem lks =>
+      CFG tids
+  end.
 
 Inductive flattening : configuration -> configuration -> Prop :=
-(* flush out all buffers *)
+| 
 .
+
 
 Inductive simulation : configuration -> configuration -> configuration -> Prop :=
 | Simulation : forall c0 ctso csc,
@@ -1980,10 +1995,16 @@ Theorem drf_guarantee :
     c0 -->* ctso ->
     exists csc, simulation c0 ctso csc.
 
-(* ---------------- DRF Guarantee Property ---------------- *)
-(* This section is to prove that "data race free programs have SC semantics" *)
-
 
 
 (* ---------------- end of DRF Guarantee Property ---------------- *)
+
+(* ---------------- ?? ---------------- *)
+Theorem drf_must_have_unlock :
+  cfg -->* cfg' with a list of evts ->
+  in that list, (t1, evt1) < (t2, evt2) ->
+  evt1 and evt2 have data-race ->
+  exists (t1, unlock) between (t1, evt1) and (t2, evt2) in the list.
+(* Gustavo didn't prove this, so he's not sure about the difficulty,
+if hard, make this an axiom. *)
 
