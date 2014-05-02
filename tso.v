@@ -1820,7 +1820,8 @@ Qed.
 
 Hint Resolve remove_then_neq.
 
-(* TODO: I used Axiom here because I failed to prove it as a theorem. This will be used in lemma tids_irrelevant! *)
+(* TODO: I used Axiom here because I failed to prove it as a theorem.
+ This will be used in lemma tids_irrelevant! *)
 Axiom thds_update_exact_equiv :
   forall thds t1 c1 t2 c2,
     thds_update thds t1 c1 = thds_update thds t2 c2 ->
@@ -2202,12 +2203,34 @@ Proof with eauto.
     constructor...
 Qed.
 
+
 Lemma write_context_invariance :
   forall t c c' mem mem' lks lks' x n,
     t @ (ST c [] mem lks) ==SC> (ST c' [] (mem_update mem x n) lks) [[EV_Write x n]] ->
     t @ (ST c [] mem' lks') ==SC> (ST c' [] (mem_update mem' x n) lks') [[EV_Write x n]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] (mem_update mem x n) lks) as st2.
+  remember (EV_Write x n) as evt.
+  generalize dependent n; generalize dependent x;
+  generalize dependent lks; generalize dependent mem;
+  generalize dependent mem'; generalize dependent lks';
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inversion Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+  Case "SC_SeqStep".
+    subst...
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inversion H.
+    inversion H1; inversion H4.
+Qed.
+
 
 Lemma lock_context_invariance_mem :
   forall t c c' mem mem' lks l,
