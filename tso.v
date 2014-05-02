@@ -2044,6 +2044,78 @@ steps are by executing a thread:
   this event in a slightly different context.
 *)
 
+Lemma astep_context_invariance_more :
+  forall a a' x1 x2 n buf mem,
+    x1 <> x2 ->
+    a /- buf ~ mem ==A> a' [[EV_Read x1]] ->
+    a /- buf ~ (mem_update mem x2 n) ==A> a' [[EV_Read x1]].
+Proof with eauto.
+  intros.
+  remember (EV_Read x1) as evt.
+  generalize dependent x1;
+  generalize dependent n; generalize dependent x2.
+  astep_cases (induction H0) Case;
+    intros; inversion Heqevt; subst; eauto.
+  Case "AS_VarMem".
+    replace (m x1) with (mem_update m x2 n x1)...
+Qed.
+
+Hint Resolve astep_context_invariance_more.
+
+Lemma astep_context_invariance_less :
+  forall a a' x1 x2 n buf mem,
+    x1 <> x2 ->
+    a /- buf ~ (mem_update mem x2 n) ==A> a' [[EV_Read x1]] ->
+    a /- buf ~ mem ==A> a' [[EV_Read x1]].
+Proof with eauto.
+  intros.
+  remember (mem_update mem x2 n) as mem'.
+  remember (EV_Read x1) as evt.
+  generalize dependent x1; generalize dependent mem;
+  generalize dependent n; generalize dependent x2.
+  astep_cases (induction H0) Case;
+    intros; inversion Heqevt; subst; eauto.
+  Case "AS_VarMem".
+    replace (mem_update mem x2 n x1) with (mem x1)...
+    rewrite -> mem_update_neq...
+Qed.
+
+Hint Resolve astep_context_invariance_less.
+
+Lemma bstep_context_invariance_more :
+  forall b b' x1 x2 n buf mem,
+    x1 <> x2 ->
+    b /- buf ~ mem ==B> b' [[EV_Read x1]] ->
+    b /- buf ~ (mem_update mem x2 n) ==B> b' [[EV_Read x1]].
+Proof with eauto.
+  intros.
+  remember (EV_Read x1) as evt.
+  generalize dependent x1;
+  generalize dependent n; generalize dependent x2.
+  bstep_cases (induction H0) Case;
+    intros; inversion Heqevt; subst; eauto.
+Qed.
+
+Hint Resolve bstep_context_invariance_more.
+
+Lemma bstep_context_invariance_less :
+  forall b b' x1 x2 n buf mem,
+    x1 <> x2 ->
+    b /- buf ~ (mem_update mem x2 n) ==B> b' [[EV_Read x1]] ->
+    b /- buf ~ mem ==B> b' [[EV_Read x1]].
+Proof with eauto.
+  intros.
+  remember (EV_Read x1) as evt.
+  remember (mem_update mem x2 n) as mem'.
+  generalize dependent x1; generalize dependent mem;
+  generalize dependent n; generalize dependent x2.
+  bstep_cases (induction H0) Case;
+    intros; inversion Heqevt; subst; eauto.
+Qed.
+
+Hint Resolve bstep_context_invariance_less.
+
+
 (* If thread is about to read variable x, then change another value in
 the memory won't affect this read *)
 Lemma read_context_invariance_mem_more :
@@ -2053,7 +2125,28 @@ Lemma read_context_invariance_mem_more :
     t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
         (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem lks) as st2.
+  remember (EV_Read x1) as evt.
+  generalize dependent x1;
+  generalize dependent n; generalize dependent x2;
+  generalize dependent lks; generalize dependent mem;
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2.
+  Case "SC_AssStep".
+    constructor.
+    apply astep_context_invariance_more...
+  Case "SC_SeqStep".
+    constructor.
+    apply IHsc with x1...
+  Case "SC_IfStep".
+    constructor.
+    apply bstep_context_invariance_more...
+Qed.
+
+Hint Resolve read_context_invariance_mem_more.
 
 Lemma read_context_invariance_mem_less :
   forall t c mem lks c' x1 x2 n,
@@ -2062,7 +2155,28 @@ Lemma read_context_invariance_mem_less :
         (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]] ->
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] (mem_update mem x2 n) lks) as st1.
+  remember (ST c' [] (mem_update mem x2 n) lks) as st2.
+  remember (EV_Read x1) as evt.
+  generalize dependent x1;
+  generalize dependent n; generalize dependent x2;
+  generalize dependent lks; generalize dependent mem;
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2.
+  Case "SC_AssStep".
+    constructor.
+    eapply astep_context_invariance_less...
+  Case "SC_SeqStep".
+    constructor.
+    eapply IHsc...
+  Case "SC_IfStep".
+    constructor.
+    eapply bstep_context_invariance_less...
+Qed.
+
+Hint Resolve read_context_invariance_mem_less.
 
 (* If thread 1 is just about to read a value, it doesn't matter what
  the current lock_status is *)
@@ -2071,7 +2185,22 @@ Lemma read_context_invariance_lks :
     t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x]] ->
     t @ (ST c [] mem lks') ==SC> (ST c' [] mem lks') [[EV_Read x]].
 Proof with eauto.
-  Admitted.
+  intros.
+  remember (ST c [] mem lks) as st1.
+  remember (ST c' [] mem lks) as st2.
+  remember (EV_Read x) as evt.
+  generalize dependent x;
+  generalize dependent lks; generalize dependent mem;
+  generalize dependent c'; generalize dependent c.
+  sc_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2.
+  Case "SC_AssStep".
+    constructor...
+  Case "SC_SeqStep".
+    constructor...
+  Case "SC_IfStep".
+    constructor...
+Qed.
 
 Lemma write_context_invariance :
   forall t c c' mem mem' lks lks' x n,
