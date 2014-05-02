@@ -342,6 +342,8 @@ Definition buffer : Type := list (var * nat).
 Definition write (b : buffer) (x : var) (n : nat) : buffer :=
   append b (x, n).
 
+Hint Unfold write.
+
 (* get the oldest write in the buffer *)
 Definition oldest (b : buffer) : option (var * nat) :=
   hd b.
@@ -386,6 +388,18 @@ Proof with auto.
 Qed.
 
 Hint Resolve get_deterministic.
+
+
+Definition buffer_status := tid -> buffer.
+
+Definition empty_buffers : buffer_status :=
+  fun _ => [].
+
+Definition bufs_update (bufs : buffer_status) (t : tid) (b : buffer) : buffer_status :=
+  fun t' => if eq_tid_dec t t' then b else bufs t'.
+
+Hint Unfold bufs_update.
+
 
 Module TestWriteBuffer.
 
@@ -1031,30 +1045,30 @@ Qed.
 
 
 (* ---------------- Threads & Configuration ---------------- *)
-(* Only Command and Write Buffer is thread private *)
-Definition threads := tid -> (cmd * buffer).
+(* command map *)
+Definition threads := tid -> cmd.
 
 Definition empty_threads : threads :=
-  fun _ => (SKIP, nil).
+  fun _ => SKIP.
 
 Hint Unfold empty_threads.
 
-Definition override (ts: threads) (t : tid) (c : cmd) (b : buffer) :=
-  fun t' => if eq_tid_dec t t'
-            then (c, b)
-            else ts t'.
+Definition thds_update (thds : threads) (t : tid) (c : cmd) :=
+  fun t' => if eq_tid_dec t t' then c else thds t'.
 
-Hint Unfold override.
+Hint Unfold thds_update.
 
-Theorem override_permute :
-  forall ts t1 c1 b1 t2 c2 b2,
+
+Theorem thds_update_permute :
+  forall ts t1 c1 t2 c2,
     t1 <> t2 ->
-    override (override ts t1 c1 b1) t2 c2 b2 = override (override ts t2 c2 b2) t1 c1 b1.
+    thds_update (thds_update ts t1 c1) t2 c2 =
+    thds_update (thds_update ts t2 c2) t1 c1.
 Proof with auto.
   intros.
   apply functional_extensionality.
   intros t.
-  unfold override.
+  unfold thds_update.
   destruct (eq_tid_dec t2 t)...
   destruct (eq_tid_dec t1 t)...
   subst.
@@ -1067,6 +1081,7 @@ Qed.
 Record configuration := CFG {
   cfg_tids : set tid;
   cfg_thds : threads;
+  cfg_bufs : buffer_status;
   cfg_mem : memory;
   cfg_lks : lock_status
 }.
@@ -1074,19 +1089,20 @@ Record configuration := CFG {
 Hint Constructors configuration.
 
 Definition empty_configuration :=
-  CFG empty_tids empty_threads empty_memory empty_locks.
+  CFG empty_tids empty_threads empty_buffers empty_memory empty_locks.
 
 
 Inductive cfg_normal_form : configuration -> Prop :=
 (* All threads finish *)
-| CFGV_End : forall thds mem lks,
-               cfg_normal_form (CFG empty_tids thds mem lks)
+| CFGV_End : forall thds bufs mem lks,
+               cfg_normal_form (CFG empty_tids thds bufs mem lks)
 (* Deadlock *)
-| CFGV_Deadlock: forall tids thds mem lks,
+| CFGV_Deadlock: forall tids thds bufs mem lks,
                    (forall t c b, in_tids t tids = true ->
-                                  thds t = (c, b) ->
+                                  thds t = c ->
+                                  bufs t = b ->
                                   waiting t (ST c b mem lks)) ->
-                   cfg_normal_form (CFG tids thds mem lks)
+                   cfg_normal_form (CFG tids thds bufs mem lks)
 .
 
 Hint Constructors cfg_normal_form.
@@ -1095,19 +1111,22 @@ Reserved Notation "cfg1 '-->' cfg2 '[[' tevt ']]'" (at level 60).
 
 Inductive cfgstep : configuration -> configuration -> (tid * event) -> Prop :=
 (* One thread already ends its job, thus remove it *)
-| CFGS_Done : forall t tids thds mem lks,
+| CFGS_Done : forall t tids thds bufs mem lks,
                 in_tids t tids = true ->
-                thds t = (SKIP, nil) ->
-                (CFG tids thds mem lks) --> (CFG (remove_tid t tids) thds mem lks)
-                                        [[(t, EV_None)]]
+                thds t = SKIP ->
+                bufs t = nil ->
+                (CFG tids thds bufs mem lks) --> (CFG (remove_tid t tids) thds bufs mem lks)
+                                             [[(t, EV_None)]]
 
 (* One thread can move one step forward, in terms of "state" *)
-| CFGS_One : forall t tids thds c c' b b' mem mem' lks lks' evt,
+| CFGS_One : forall t tids thds bufs c c' b b' mem mem' lks lks' evt,
                in_tids t tids = true ->
-               thds t = (c, b) ->
+               thds t = c ->
+               bufs t = b ->
                t @ (ST c b mem lks) ==> (ST c' b' mem' lks') [[evt]] ->
-               (CFG tids thds mem lks) -->
-                 (CFG tids (override thds t c' b') mem' lks') [[(t, evt)]]
+               (CFG tids thds bufs mem lks) -->
+                 (CFG tids (thds_update thds t c') (bufs_update bufs t b') mem' lks')
+                 [[(t, evt)]]
 
 where "cfg1 '-->' cfg2 '[[' tevt ']]'" := (cfgstep cfg1 cfg2 tevt).
 
@@ -1124,9 +1143,9 @@ Fixpoint _init_cfg (lc : list cmd) (n : nat) (accu : configuration) : configurat
     | nil => accu
     | h :: tlc =>
       match accu with
-        | CFG tids thds mem lks =>
+        | CFG tids thds bufs mem lks =>
           let t := TID n in
-          let accu' := CFG (add_tid t tids) (override thds t h nil) mem lks in
+          let accu' := CFG (add_tid t tids) (thds_update thds t h) bufs mem lks in
           _init_cfg tlc (S n) accu'
       end
   end.
@@ -1216,10 +1235,10 @@ Definition codes : list cmd :=
 
 (* The following is to prove that the init_cfg function works as expected *)
 Example preprocess:
-  forall tids thds mem lks,
-    init_cfg codes = (CFG tids thds mem lks) ->
+  forall tids thds bufs mem lks,
+    init_cfg codes = (CFG tids thds bufs mem lks) ->
     size_tids tids = 2 /\ in_tids T0 tids = true /\ in_tids T1 tids = true
-    /\ thds T0 = (proc0, nil) /\ thds T1 = (proc1, nil).
+    /\ thds T0 = proc0 /\ thds T1 = proc1.
 Proof.
   intros.
   unfold codes, proc0, proc1, init_cfg in *.
@@ -1230,11 +1249,12 @@ Qed.
 (* The following is to prove that the final state is actually
 reachable by the language and semantics defined above. *)
 Theorem tso_semantics:
-  exists thds mem lks trc,
-    init_cfg codes -->* (CFG empty_tids thds mem lks) [[trc]] /\
-    cfg_normal_form (CFG empty_tids thds mem lks) /\ (* final state *)
+  exists thds bufs mem lks trc,
+    init_cfg codes -->* (CFG empty_tids thds bufs mem lks) [[trc]] /\
+    cfg_normal_form (CFG empty_tids thds bufs mem lks) /\ (* final state *)
     mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
+  eexists.
   eexists.
   eexists.
   eexists.
@@ -1504,19 +1524,21 @@ Reserved Notation "cfg1 '--SC>' cfg2 '[[' tevt ']]'" (at level 60).
 
 Inductive cfgsc : configuration -> configuration -> (tid * event) -> Prop :=
 (* One thread already ends its job, thus remove it *)
-| CFGSC_Done : forall t tids thds mem lks,
+| CFGSC_Done : forall t tids thds bufs mem lks,
                  in_tids t tids = true ->
-                 thds t = (SKIP, nil) ->
-                 (CFG tids thds mem lks) --SC> (CFG (remove_tid t tids) thds mem lks)
-                                                 [[(t, EV_None)]]
+                 thds t = SKIP ->
+                 bufs t = nil ->
+                 (CFG tids thds bufs mem lks) --SC> (CFG (remove_tid t tids) thds bufs mem lks)
+                                                      [[(t, EV_None)]]
 
 (* One thread can move one step forward, in terms of "state" *)
-| CFGSC_One : forall t tids thds c c' mem mem' lks lks' evt,
+| CFGSC_One : forall t tids thds bufs c c' mem mem' lks lks' evt,
                 in_tids t tids = true ->
-                thds t = (c, nil) ->
+                thds t = c ->
+                bufs t = nil ->
                 t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[evt]] ->
-                (CFG tids thds mem lks) --SC>
-                  (CFG tids (override thds t c' nil) mem' lks') [[(t, evt)]]
+                (CFG tids thds bufs mem lks) --SC>
+                  (CFG tids (thds_update thds t c') bufs mem' lks') [[(t, evt)]]
 
 where "cfg1 '--SC>' cfg2 '[[' tevt ']]'" := (cfgsc cfg1 cfg2 tevt).
 
@@ -1605,12 +1627,12 @@ Hint Constructors datarace.
 
 (* Note: DRF must be under SC semantics *)
 Definition data_race_free (cfg : configuration) : Prop :=
-  ~ (exists tids thds mem lks t1 t2 trc,
-       cfg --SC>* (CFG tids thds mem lks) [[trc]]
+  ~ (exists tids thds bufs mem lks t1 t2 trc,
+       cfg --SC>* (CFG tids thds bufs mem lks) [[trc]]
        /\ in_tids t1 tids = true
        /\ in_tids t2 tids = true
        /\ t1 <> t2
-       /\ datarace (fst (thds t1)) (fst (thds t2))
+       /\ datarace (thds t1) (thds t2)
     ).
 
 
@@ -1627,14 +1649,15 @@ Proof with eauto.
   apply Hdrf.
   inversion Hf as [tids]; clear Hf.
   inversion H1 as [thds]; clear H1.
-  inversion H2 as [mem]; clear H2.
-  inversion H1 as [lks]; clear H1.
-  inversion H2 as [t1]; clear H2.
-  inversion H1 as [t2]; clear H1.
-  inversion H2 as [trc']; clear H2.
-  inv H1.
+  inversion H2 as [bufs]; clear H2.
+  inversion H1 as [mem]; clear H1.
+  inversion H2 as [lks]; clear H2.
+  inversion H1 as [t1]; clear H1.
+  inversion H2 as [t2]; clear H2.
+  inversion H1 as [trc']; clear H1.
+  inv H2.
 
-  exists tids; exists thds; exists mem; exists lks;
+  exists tids; exists thds; exists bufs; exists mem; exists lks;
   exists t1; exists t2; exists (tevt :: trc').
   split...
 
@@ -1760,23 +1783,25 @@ Qed.
 Hint Resolve remove_then_neq.
 
 (* TODO: I used Axiom here because I failed to prove it as a theorem. This will be used in lemma tids_irrelevant! *)
-Axiom override_exact_eq :
+Axiom thds_update_exact_equiv :
   forall thds t1 c1 t2 c2,
-    override thds t1 c1 [] = override thds t2 c2 [] ->
+    thds_update thds t1 c1 = thds_update thds t2 c2 ->
     t1 = t2 /\ c1 = c2.
 
 (* Changing to another tid set won't affect the result when the
 executied thread is still in that set *)
 Lemma tids_irrelevant :
-  forall tids tids' thds mem lks t c' mem' lks' evt,
-    (CFG tids thds mem lks) --SC> (CFG tids (override thds t c' []) mem' lks') [[(t, evt)]] ->
+  forall tids tids' thds bufs mem lks t c' mem' lks' evt,
+    (CFG tids thds bufs mem lks) --SC>
+      (CFG tids (thds_update thds t c') bufs mem' lks') [[(t, evt)]] ->
     in_tids t tids' = true ->
-    (CFG tids' thds mem lks) --SC> (CFG tids' (override thds t c' []) mem' lks') [[(t, evt)]].
+    (CFG tids' thds bufs mem lks) --SC>
+      (CFG tids' (thds_update thds t c') bufs mem' lks') [[(t, evt)]].
 Proof with eauto.
   intros.
   generalize dependent tids'.
-  remember (CFG tids thds mem lks) as cfg.
-  remember (CFG tids (override thds t c' []) mem' lks') as cfg'.
+  remember (CFG tids thds bufs mem lks) as cfg.
+  remember (CFG tids (thds_update thds t c') bufs mem' lks') as cfg'.
   generalize dependent lks; generalize dependent mem.
   generalize dependent thds; generalize dependent tids.
   generalize dependent c'; generalize dependent mem';
@@ -1785,10 +1810,10 @@ Proof with eauto.
     intros; inversion Heqcfg; subst; clear Heqcfg; inversion Heqcfg'.
   Case "CFGSC_Done".
     assert (remove_tid t0 tids0 <> tids0) by eauto.
-    apply H2 in H3; inversion H3.
+    apply H3 in H4; inversion H4.
   Case "CFGSC_One".
     clear Heqcfg'; subst.
-    apply override_exact_eq in H4.
+    apply thds_update_exact_equiv in H4.
     inv H4...
 Qed.
 
@@ -1883,23 +1908,23 @@ Proof with eauto.
     inversion H12; subst.
     SCase "cfg1 --> cfg2 : CFGSC_Done".
       rewrite -> remove_order_independent.
-      exists (CFG (remove_tid t2 tids) thds mem lks); split.
+      exists (CFG (remove_tid t2 tids) thds bufs mem lks); split.
       constructor...
       constructor.
       rewrite <- remove_irrelevant...
-      auto.
+      auto. auto.
     SCase "cfg1 --> cfg2 : CFGSC_One".
-      exists (CFG tids (override thds t2 c' []) mem' lks'); split.
+      exists (CFG tids (thds_update thds t2 c') bufs mem' lks'); split.
       apply tids_irrelevant with (remove_tid t1 tids); auto.
-      rewrite <- H6; apply remove_irrelevant; auto.
+      rewrite <- H8; apply remove_irrelevant; auto.
       constructor...
-      unfold override; rewrite -> neq_tid...
+      unfold thds_update; rewrite -> neq_tid...
   Case "cfg0 --> cfg1 : CFGSC_One".
     inversion H12; subst.
     SCase "cfg1 --> cfg2 : CFGSC_Done".
-      exists (CFG (remove_tid t2 tids) thds mem lks); split.
+      exists (CFG (remove_tid t2 tids) thds bufs mem lks); split.
       constructor...
-      unfold override in H10; rewrite -> neq_tid in H10...
+      unfold thds_update in H11; rewrite -> neq_tid in H11...
       apply tids_irrelevant with tids; auto.
       rewrite <- H1; symmetry; apply remove_irrelevant...
     SCase "cfg1 --> cfg2 : CFGSC_One".
@@ -1907,32 +1932,30 @@ Proof with eauto.
       event_cases (induction evt1) SSCase.
       SSCase "EV_Read".
         assert (mem = mem' /\ lks = lks').
-          eapply sc_event_read; apply H5.
+          eapply sc_event_read; apply H6.
         inv H.
         event_cases (induction evt2) SSSCase.
         SSSCase "EV_Read".
           assert (mem' = mem'0 /\ lks' = lks'0).
-            eapply sc_event_read; apply H11.
+            eapply sc_event_read; apply H14.
           inv H.
-          exists (CFG tids (override thds t2 c'0 []) mem'0 lks'0); split.
-          apply CFGSC_One with c0...
-          unfold override in H10; rewrite neq_tid in H10...
-          rewrite -> override_permute.
-          apply CFGSC_One with c...
-          unfold override; rewrite neq_tid... auto.
+          rewrite -> thds_update_permute.
+          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
+          unfold thds_update in H14; rewrite neq_tid in H14...
+          apply CFGSC_One with (thds t1)...
+          unfold thds_update; rewrite neq_tid... auto.
         SSSCase "EV_Write".
           destruct (eq_var_dec x x0); subst.
           assert (conflict (EV_Read x0) (EV_Write x0 n)) by auto.
           apply Hcfl in H; invf H.
           assert (mem'0 = mem_update mem' x0 n /\ lks' = lks'0).
-            eapply sc_event_write; apply H11.
+            eapply sc_event_write; apply H14.
           inv H.
-          exists (CFG tids (override thds t2 c'0 []) (mem_update mem' x0 n) lks'0); split.
-          apply CFGSC_One with c0...
-          unfold override in H10; rewrite neq_tid in H10...
-          rewrite -> override_permute.
-          apply CFGSC_One with c...
-          unfold override; rewrite -> neq_tid...
+          rewrite -> thds_update_permute.
+          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x0 n) lks'0); split.
+          unfold thds_update in H14; rewrite neq_tid in H14...
+          apply CFGSC_One with (thds t1)...
+          unfold thds_update; rewrite -> neq_tid...
           apply read_context_invariance... auto.
         SSSCase "EV_Lock".
 
