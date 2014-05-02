@@ -15,7 +15,7 @@ Contraints:
   than None.
 
 Xuankang LIN
-Last updated: 05/01/2014
+Last updated: 05/02/2014
 
 
 Structure:
@@ -1868,18 +1868,54 @@ steps are by executing a thread:
   What it means for a smallstep to generate a EV_XX event?
 *)
 Lemma astep_event_read_or_none:
-  forall a1 a2 mem evt,
-    a1 /- [] ~ mem ==A> a2 [[evt]] ->
+  forall a1 a2 buf mem evt,
+    a1 /- buf ~ mem ==A> a2 [[evt]] ->
     exists x, evt = EV_Read x \/ evt = EV_None.
 Proof with auto.
-  Admitted.
+  intros.
+  astep_cases (induction H) Case;
+    auto.
+  Case "AS_Plus".
+  (* Here name X just for proof requirements, it can also be Y *)
+    exists X; right...
+  Case "AS_Minus".
+    exists X; right...
+  Case "AS_Mult".
+    exists X; right...
+  Case "AS_VarBuf".
+    exists x; left...
+  Case "AS_VarMem".
+    exists x; left...
+Qed.
+
+Hint Resolve astep_event_read_or_none.
 
 Lemma bstep_event_read_or_none:
-  forall b1 b2 mem evt,
-    b1 /- [] ~ mem ==B> b2 [[evt]] ->
+  forall b1 b2 buf mem evt,
+    b1 /- buf ~ mem ==B> b2 [[evt]] ->
     exists x, evt = EV_Read x \/ evt = EV_None.
 Proof with auto.
-  Admitted.
+  intros.
+  bstep_cases (induction H) Case;
+    auto.
+  Case "BS_Not".
+  (* Here name X just for proof requirements, it can also be Y *)
+    exists X; right...
+  Case "BS_And".
+    exists X; right...
+  Case "BS_Eq".
+    exists X; right...
+  Case "BS_Eq1".
+    apply astep_event_read_or_none in H...
+  Case "BS_Eq2".
+    apply astep_event_read_or_none in H0...
+  Case "BS_Le".
+    exists X; right...
+  Case "BS_Le1".
+    apply astep_event_read_or_none in H...
+  Case "BS_Le2".
+    apply astep_event_read_or_none in H0...
+Qed.
 
 Lemma sc_event_read :
   forall t c c' mem lks mem' lks' x,
