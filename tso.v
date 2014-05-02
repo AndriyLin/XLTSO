@@ -1733,6 +1733,10 @@ Tactic Notation "conflict_cases" tactic(first) ident(c) :=
   | Case_aux c "CFL_UnLk" | Case_aux c "CFL_UnUn"
   ].
 
+(* ---------------------------------------------------------------- *)
+
+(* The following several lemmas are for the Diamond Theorem when at
+least one step is by ending a thread *)
 
 (* When removing 2 tids, it doesn't matter which one is removed first. *)
 Lemma remove_order_independent :
@@ -1853,6 +1857,29 @@ Qed.
 
 Hint Resolve tids_irrelevant.
 
+(* end of all lemmas for the Diamond Theorem when at least one step is
+by ending a thread *)
+
+(* ---------------------------------------------------------------- *)
+
+(* The following several lemmas are for the Diamond Theorem when both
+steps are by executing a thread:
+
+  What it means for a smallstep to generate a EV_XX event?
+*)
+Lemma astep_event_read_or_none:
+  forall a1 a2 mem evt,
+    a1 /- [] ~ mem ==A> a2 [[evt]] ->
+    exists x, evt = EV_Read x \/ evt = EV_None.
+Proof with auto.
+  Admitted.
+
+Lemma bstep_event_read_or_none:
+  forall b1 b2 mem evt,
+    b1 /- [] ~ mem ==B> b2 [[evt]] ->
+    exists x, evt = EV_Read x \/ evt = EV_None.
+Proof with auto.
+  Admitted.
 
 Lemma sc_event_read :
   forall t c c' mem lks mem' lks' x,
@@ -1871,114 +1898,6 @@ Proof with eauto.
     intros; inversion Heqevt;
     inversion Heqst1; inversion Heqst2; subst...
 Qed.
-
-(* If thread is about to read variable x, then change another value in
-the memory won't affect this read *)
-Lemma read_context_invariance_mem_more :
-  forall t c mem lks c' x1 x2 n,
-    x1 <> x2 ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]] ->
-    t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
-        (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]].
-Proof with eauto.
-  Admitted.
-
-Lemma read_context_invariance_mem_less :
-  forall t c mem lks c' x1 x2 n,
-    x1 <> x2 ->
-    t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
-        (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]] ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]].
-Proof with eauto.
-  Admitted.
-
-(* If thread 1 is just about to read a value, it doesn't matter what
- the current lock_status is *)
-Lemma read_context_invariance_lks :
-  forall t c c' mem lks lks' x,
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x]] ->
-    t @ (ST c [] mem lks') ==SC> (ST c' [] mem lks') [[EV_Read x]].
-Proof with eauto.
-  Admitted.
-
-Lemma write_context_invariance :
-  forall t c c' mem mem' lks lks' x n,
-    t @ (ST c [] mem lks) ==SC> (ST c' [] (mem_update mem x n) lks) [[EV_Write x n]] ->
-    t @ (ST c [] mem' lks') ==SC> (ST c' [] (mem_update mem' x n) lks') [[EV_Write x n]].
-Proof with eauto.
-  Admitted.
-
-Lemma lock_context_invariance_mem :
-  forall t c c' mem mem' lks l,
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l)) [[EV_Lock l]] ->
-    t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (lock lks t l)) [[EV_Lock l]].
-Proof with eauto.
-  Admitted.
-
-Lemma lock_context_invariance_lks_less :
-  forall t c c' mem lks l1 l2 v2,
-    l1 <> l2 ->
-    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
-        (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]] ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l1)) [[EV_Lock l1]].
-Proof with eauto.
-  Admitted.
-
-Lemma lock_context_invariance_lks_more :
-  forall t c c' mem lks l1 l2 v2,
-    l1 <> l2 ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l1)) [[EV_Lock l1]] ->
-    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
-         (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]].
-Proof with eauto.
-  Admitted.
-
-Lemma unlock_context_invariance_mem :
-  forall t c c' mem mem' lks l,
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l)) [[EV_Unlock l]] ->
-    t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (unlock lks l)) [[EV_Unlock l]].
-Proof with eauto.
-  Admitted.
-
-Lemma unlock_context_invariance_lks_less :
-  forall t c c' mem lks l1 l2 v2,
-    l1 <> l2 ->
-    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
-        (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]] ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l1)) [[EV_Unlock l1]].
-Proof with eauto.
-  Admitted.
-
-Lemma unlock_context_invariance_lks_more :
-  forall t c c' mem lks l1 l2 v2,
-    l1 <> l2 ->
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l1)) [[EV_Unlock l1]] ->
-    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
-         (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]].
-Proof with eauto.
-  Admitted.
-
-Lemma none_context_invariance :
-  forall t c c' mem mem' lks lks',
-    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_None]] ->
-    t @ (ST c [] mem' lks') ==SC> (ST c' [] mem' lks') [[EV_None]].
-Proof with eauto.
-(* TODO: this lemma I am not 100% sure *)
-  Admitted.
-
-Lemma astep_event_read_or_none:
-  forall a1 a2 mem evt,
-    a1 /- [] ~ mem ==A> a2 [[evt]] ->
-    exists x, evt = EV_Read x \/ evt = EV_None.
-Proof with auto.
-  Admitted.
-
-Lemma bstep_event_read_or_none:
-  forall b1 b2 mem evt,
-    b1 /- [] ~ mem ==B> b2 [[evt]] ->
-    exists x, evt = EV_Read x \/ evt = EV_None.
-Proof with auto.
-  Admitted.
 
 Lemma sc_event_write :
   forall t c c' mem lks mem' lks' x n,
@@ -2074,6 +1993,125 @@ Proof with eauto.
     intros; inversion Heqevt; subst;
     inv Heqst1; inv Heqst2...
 Qed.
+
+
+(* end of all lemmas for:
+     What it means for a smallstep to generate a EV_XX event?
+*)
+
+(* ---------------------------------------------------------------- *)
+
+(* The following several lemmas are for the Diamond Theorem when both
+steps are by executing a thread:
+
+  If a smallstep generates an event EV_XXX, then it will also generate
+  this event in a slightly different context.
+*)
+
+(* If thread is about to read variable x, then change another value in
+the memory won't affect this read *)
+Lemma read_context_invariance_mem_more :
+  forall t c mem lks c' x1 x2 n,
+    x1 <> x2 ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]] ->
+    t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
+        (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]].
+Proof with eauto.
+  Admitted.
+
+Lemma read_context_invariance_mem_less :
+  forall t c mem lks c' x1 x2 n,
+    x1 <> x2 ->
+    t @ (ST c [] (mem_update mem x2 n) lks) ==SC>
+        (ST c' [] (mem_update mem x2 n) lks) [[EV_Read x1]] ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x1]].
+Proof with eauto.
+  Admitted.
+
+(* If thread 1 is just about to read a value, it doesn't matter what
+ the current lock_status is *)
+Lemma read_context_invariance_lks :
+  forall t c c' mem lks lks' x,
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_Read x]] ->
+    t @ (ST c [] mem lks') ==SC> (ST c' [] mem lks') [[EV_Read x]].
+Proof with eauto.
+  Admitted.
+
+Lemma write_context_invariance :
+  forall t c c' mem mem' lks lks' x n,
+    t @ (ST c [] mem lks) ==SC> (ST c' [] (mem_update mem x n) lks) [[EV_Write x n]] ->
+    t @ (ST c [] mem' lks') ==SC> (ST c' [] (mem_update mem' x n) lks') [[EV_Write x n]].
+Proof with eauto.
+  Admitted.
+
+Lemma lock_context_invariance_mem :
+  forall t c c' mem mem' lks l,
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l)) [[EV_Lock l]] ->
+    t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (lock lks t l)) [[EV_Lock l]].
+Proof with eauto.
+  Admitted.
+
+Lemma lock_context_invariance_lks_less :
+  forall t c c' mem lks l1 l2 v2,
+    l1 <> l2 ->
+    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
+        (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]] ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l1)) [[EV_Lock l1]].
+Proof with eauto.
+  Admitted.
+
+Lemma lock_context_invariance_lks_more :
+  forall t c c' mem lks l1 l2 v2,
+    l1 <> l2 ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (lock lks t l1)) [[EV_Lock l1]] ->
+    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
+         (ST c' [] mem (lock (lks_update lks l2 v2) t l1)) [[EV_Lock l1]].
+Proof with eauto.
+  Admitted.
+
+Lemma unlock_context_invariance_mem :
+  forall t c c' mem mem' lks l,
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l)) [[EV_Unlock l]] ->
+    t @ (ST c [] mem' lks) ==SC> (ST c' [] mem' (unlock lks l)) [[EV_Unlock l]].
+Proof with eauto.
+  Admitted.
+
+Lemma unlock_context_invariance_lks_less :
+  forall t c c' mem lks l1 l2 v2,
+    l1 <> l2 ->
+    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
+        (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]] ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l1)) [[EV_Unlock l1]].
+Proof with eauto.
+  Admitted.
+
+Lemma unlock_context_invariance_lks_more :
+  forall t c c' mem lks l1 l2 v2,
+    l1 <> l2 ->
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem (unlock lks l1)) [[EV_Unlock l1]] ->
+    t @ (ST c [] mem (lks_update lks l2 v2)) ==SC>
+         (ST c' [] mem (unlock (lks_update lks l2 v2) l1)) [[EV_Unlock l1]].
+Proof with eauto.
+  Admitted.
+
+Lemma none_context_invariance :
+  forall t c c' mem mem' lks lks',
+    t @ (ST c [] mem lks) ==SC> (ST c' [] mem lks) [[EV_None]] ->
+    t @ (ST c [] mem' lks') ==SC> (ST c' [] mem' lks') [[EV_None]].
+Proof with eauto.
+(* TODO: this lemma I am not 100% sure *)
+  Admitted.
+
+
+(* end of all lemmas for:
+
+  If a smallstep generates an event EV_XXX, then it will also generate
+  this event in a slightly different context.
+*)
+
+(* ---------------------------------------------------------------- *)
+
+(* Finally, the Diamon theorem itself: *)
 
 Theorem diamond :
   forall cfg0 cfg1 cfg2 t1 t2 evt1 evt2,
