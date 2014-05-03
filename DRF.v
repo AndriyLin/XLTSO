@@ -162,142 +162,8 @@ Tactic Notation "conflict_cases" tactic(first) ident(c) :=
   | Case_aux c "CFL_UnLk" | Case_aux c "CFL_UnUn"
   ].
 
-(* ---------------------------------------------------------------- *)
-
-(* The following several lemmas are for the Diamond Theorem when at
-least one step is by ending a thread *)
-
-(* When removing 2 tids, it doesn't matter which one is removed first. *)
-Lemma remove_order_independent :
-  forall tids t1 t2,
-    remove_tid t2 (remove_tid t1 tids) = remove_tid t1 (remove_tid t2 tids).
-Proof with auto.
-  intros tids.
-  induction tids as [ | hd tl];
-    intros; simpl...
-  Case "tids = hd :: tl".
-  destruct (eq_tid_dec t1 hd) eqn:Ht1hd; subst.
-  SCase "t1 = hd".
-    destruct (eq_tid_dec t2 hd) eqn:Ht2hd; subst...
-    SSCase "t2 <> hd".
-    simpl; rewrite -> eq_tid...
-  SCase "t1 <> hd".
-    destruct (eq_tid_dec t2 hd) eqn:Ht2hd; subst...
-    SSCase "t2 = hd".
-      simpl; rewrite -> eq_tid...
-    SSCase "t2 <> hd".
-      simpl; rewrite -> Ht1hd; rewrite -> Ht2hd.
-      rewrite -> IHtl...
-Qed.
-
-Hint Resolve remove_order_independent.
-
-(* Removing a tid won't affect the result of in_tids t' when t <> t' *)
-Lemma remove_irrelevant :
-  forall tids t1 t2,
-    t1 <> t2 ->
-    in_tids t2 tids = in_tids t2 (remove_tid t1 tids).
-Proof with auto.
-  intros.
-  induction tids as [ | hd tl]...
-  simpl.
-  destruct (eq_tid_dec t2 hd) eqn:Ht2hd;
-    destruct (eq_tid_dec t1 hd) eqn:Ht1hd; subst...
-  apply ex_falso_quodlibet; apply H...
-  simpl; rewrite -> eq_tid...
-  simpl; rewrite -> Ht2hd...
-Qed.
-
-Hint Resolve remove_irrelevant.
-
-(* I really don't forsee that this theorem needs to be proved explicitly!! *)
-Lemma list_neq :
-  forall (ts : list tid) (t : tid), ts <> t :: ts.
-Proof with auto.
-  intros ts.
-  induction ts; intros.
-  intros Hf; inversion Hf.
-  intros Hf.
-  inversion Hf.
-  apply IHts in H1.
-  inversion H1.
-Qed.
-
-Hint Resolve list_neq.
-
-(* once something is actually removed from a set, the set is no longer the same as before *)
-Lemma remove_then_neq :
-  forall tids t,
-    in_tids t tids = true ->
-    remove_tid t tids <> tids.
-Proof with auto.
-  intros tids.
-  induction tids as [ | hd tl];
-    intros.
-  Case "tids = nil".
-    inversion H.
-  Case "tids = hd :: tl".
-    simpl.
-    destruct (eq_tid_dec t hd) eqn:Hthd; subst.
-    apply list_neq.
-    intros Hf.
-    inversion Hf.
-    apply IHtl in H1...
-    simpl in H.
-    rewrite -> Hthd in H...
-Qed.
-
-Hint Resolve remove_then_neq.
-
-(* TODO: I used Axiom here because I failed to prove it as a theorem.
- This will be used in lemma tids_irrelevant!
-
-One way to eliminate this axiom is to modify the definition of
-CFGSC/CFGTSO to make it only has XX_One, no more XX_End, then in
-cfg_normal_form, instead of just checking tid set empty, check that
-in_tids -> thds t = SKIP /\ bufs t = nil.
- *)
-Axiom thds_update_exact_equiv :
-  forall thds t1 c1 t2 c2,
-    thds_update thds t1 c1 = thds_update thds t2 c2 ->
-    t1 = t2 /\ c1 = c2.
-
-(* Changing to another tid set won't affect the result when the
-executied thread is still in that set *)
-Lemma tids_irrelevant :
-  forall tids tids' thds bufs mem lks t c' mem' lks' evt,
-    (CFG tids thds bufs mem lks) --SC>
-      (CFG tids (thds_update thds t c') bufs mem' lks') [[(t, evt)]] ->
-    in_tids t tids' = true ->
-    (CFG tids' thds bufs mem lks) --SC>
-      (CFG tids' (thds_update thds t c') bufs mem' lks') [[(t, evt)]].
-Proof with eauto.
-  intros.
-  generalize dependent tids'.
-  remember (CFG tids thds bufs mem lks) as cfg.
-  remember (CFG tids (thds_update thds t c') bufs mem' lks') as cfg'.
-  generalize dependent lks; generalize dependent mem.
-  generalize dependent thds; generalize dependent tids.
-  generalize dependent c'; generalize dependent mem';
-  generalize dependent lks'.
-  cfgsc_cases (induction H) Case;
-    intros; inversion Heqcfg; subst; clear Heqcfg; inversion Heqcfg'.
-  Case "CFGSC_Done".
-    assert (remove_tid t0 tids0 <> tids0) by eauto.
-    apply H3 in H4; inversion H4.
-  Case "CFGSC_One".
-    clear Heqcfg'; subst.
-    apply thds_update_exact_equiv in H4.
-    inv H4...
-Qed.
-
-Hint Resolve tids_irrelevant.
-
-(* end of all lemmas for the Diamond Theorem when at least one step is
-by ending a thread *)
 
 (* ---------------------------------------------------------------- *)
-
 (* The following several lemmas are for the Diamond Theorem when both
 steps are by executing a thread:
 
@@ -352,6 +218,8 @@ Proof with auto.
   Case "BS_Le2".
     apply astep_event_read_or_none in H0...
 Qed.
+
+Hint Resolve bstep_event_read_or_none.
 
 Lemma sc_event_read :
   forall t c c' mem lks mem' lks' x,
@@ -466,18 +334,15 @@ Proof with eauto.
     inv Heqst1; inv Heqst2...
 Qed.
 
-
 (* end of all lemmas for:
      What it means for a smallstep to generate a EV_XX event?
 *)
 
 (* ---------------------------------------------------------------- *)
+(* The following several lemmas are for the Diamond Theorem:
 
-(* The following several lemmas are for the Diamond Theorem when both
-steps are by executing a thread:
-
-  If a smallstep generates an event EV_XXX, then it will also generate
-  this event in a slightly different context.
+    If a smallstep generates an event EV_XXX, then it will also
+    generate this event in a slightly different context.
 *)
 
 Lemma astep_read_context_invariance_more :
@@ -637,6 +502,10 @@ Proof with eauto.
   Case "SC_IfStep".
     constructor...
 Qed.
+
+(* If added this, it would somehow cause problems..
+Hint Resolve read_context_invariance_lks.
+*)
 
 
 Lemma write_context_invariance :
@@ -898,7 +767,6 @@ Qed.
 (* ---------------------------------------------------------------- *)
 
 (* Finally, the Diamon theorem itself: *)
-
 Theorem diamond :
   forall cfg0 cfg1 cfg2 t1 t2 evt1 evt2,
     t1 <> t2 ->
@@ -907,46 +775,10 @@ Theorem diamond :
     ~ (conflict evt1 evt2) ->
     exists cfg1', cfg0 --SC> cfg1' [[(t2, evt2)]] /\ cfg1' --SC> cfg2 [[(t1, evt1)]].
 Proof with eauto.
-(*
-In this almost 400-lines proof, I first divide the cases of "--SC>",
-when at least one step is by ending one thread, it's easy to prove
-that swapping the execution order of the 2 threads can reach the same
-final configuration.
-*)
   intros cfg0 cfg1 cfg2 t1 t2 evt1 evt2 Ht H01 H12 Hcfl.
-  generalize dependent evt2.
-  generalize dependent cfg2.
-  generalize dependent t2.
-  inversion H01;
-    intros; subst.
-  Case "cfg0 --> cfg1 : CFGSC_Done".
-    inversion H12; subst.
-    SCase "cfg1 --> cfg2 : CFGSC_Done".
-      rewrite -> remove_order_independent.
-      exists (CFG (remove_tid t2 tids) thds bufs mem lks); split.
-      constructor...
-      constructor.
-      rewrite <- remove_irrelevant...
-      auto. auto.
-    SCase "cfg1 --> cfg2 : CFGSC_One".
-      exists (CFG tids (thds_update thds t2 c') bufs mem' lks'); split.
-      apply tids_irrelevant with (remove_tid t1 tids); auto.
-      rewrite <- H8; apply remove_irrelevant; auto.
-      constructor...
-      unfold thds_update; rewrite -> neq_tid...
-  Case "cfg0 --> cfg1 : CFGSC_One".
-    inversion H12; subst.
-    SCase "cfg1 --> cfg2 : CFGSC_Done".
-      exists (CFG (remove_tid t2 tids) thds bufs mem lks); split.
-      constructor...
-      unfold thds_update in H11; rewrite -> neq_tid in H11...
-      apply tids_irrelevant with tids; auto.
-      rewrite <- H1; symmetry; apply remove_irrelevant...
-    SCase "cfg1 --> cfg2 : CFGSC_One".
+  inversion H01; subst.
+  inversion H12; subst.
 (*
-When both steps are by executing one thread, there are many cases to
-analysize.
-
 I choose to do case analysis on events, each event can be Read, Write,
 Lock, Unlock, None. So there are 25 cases.. >_<
 
@@ -959,327 +791,327 @@ Generating a None event means: mem' = mem /\ lks' = lks
 Then by a bunch of lemmas stated above this theorem, the proof in each
 case is not hard. It's just time-consuming!
 *)
-      event_cases (induction evt1) SSCase.
-      SSCase "EV_Read". (* evt1 : Read *)
-        assert (mem = mem' /\ lks = lks').
-          eapply sc_event_read; apply H6.
-        inv H.
-        event_cases (induction evt2) SSSCase;
-          (* make it first update t2, then update t1 *)
-          rewrite -> thds_update_permute.
+  event_cases (induction evt1) Case.
+  Case "EV_Read". (* evt1 : Read *)
+    assert (mem = mem' /\ lks = lks').
+      eapply sc_event_read; apply H6.
+    inv H.
+    event_cases (induction evt2) SCase;
+    (* make it first update t2, then update t1 *)
+      rewrite -> thds_update_permute.
 
-        SSSCase "EV_Read". (* evt1 : Read / evt2 : Read *)
-          assert (mem' = mem'0 /\ lks' = lks'0).
-            eapply sc_event_read; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
-          rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_Read". (* evt1 : Read / evt2 : Read *)
+      assert (mem' = mem'0 /\ lks' = lks'0).
+        eapply sc_event_read; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
+      rewrite -> thds_update_neq in H14...
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Write". (* evt1 : Read / evt2 : Write *)
-          destruct (eq_var_dec x x0); subst.
-          assert (conflict (EV_Read x0) (EV_Write x0 n)) by auto.
-          apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
+    SCase "EV_Write". (* evt1 : Read / evt2 : Write *)
+      destruct (eq_var_dec x x0); subst.
+      assert (conflict (EV_Read x0) (EV_Write x0 n)) by auto.
+      apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
 
-          assert (mem'0 = mem_update mem' x0 n /\ lks' = lks'0).
-            eapply sc_event_write; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x0 n) lks'0); split.
-          rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)... auto.
+      assert (mem'0 = mem_update mem' x0 n /\ lks' = lks'0).
+        eapply sc_event_write; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x0 n) lks'0); split.
+      rewrite -> thds_update_neq in H14...
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Lock". (* evt1 : Read / evt2 : Lock *)
-          assert (mem' = mem'0 /\ lks'0 = lock lks' t2 l).
-            eapply sc_event_lock; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lock lks' t2 l)); split.
-          rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)...
-          eapply read_context_invariance_lks... auto.
+    SCase "EV_Lock". (* evt1 : Read / evt2 : Lock *)
+      assert (mem' = mem'0 /\ lks'0 = lock lks' t2 l).
+        eapply sc_event_lock; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lock lks' t2 l)); split.
+      rewrite -> thds_update_neq in H14...
+      apply CFGSC with (thds t1)...
+      eapply read_context_invariance_lks... auto.
 
-        SSSCase "EV_Unlock". (* evt1 : Read / evt2 : Unlock *)
-          assert (mem' = mem'0 /\ lks'0 = unlock lks' l).
-            eapply sc_event_unlock; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (unlock lks' l)); split.
-          rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)...
-          eapply read_context_invariance_lks... auto.
+    SCase "EV_Unlock". (* evt1 : Read / evt2 : Unlock *)
+      assert (mem' = mem'0 /\ lks'0 = unlock lks' l).
+        eapply sc_event_unlock; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (unlock lks' l)); split.
+      rewrite -> thds_update_neq in H14...
+      apply CFGSC with (thds t1)...
+      eapply read_context_invariance_lks... auto.
 
-        SSSCase "EV_None". (* evt1 : Read / evt2 : None *)
-          assert (mem' = mem'0 /\ lks' = lks'0).
-            eapply sc_event_none; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
-          rewrite -> thds_update_neq in H14...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_None". (* evt1 : Read / evt2 : None *)
+      assert (mem' = mem'0 /\ lks' = lks'0).
+        eapply sc_event_none; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
+      rewrite -> thds_update_neq in H14...
+      apply CFGSC with (thds t1)... auto.
 
-      SSCase "EV_Write". (* evt1 : Write *)
-        assert (mem' = mem_update mem x n /\ lks = lks').
-          eapply sc_event_write; apply H6.
-        inv H.
-        event_cases (induction evt2) SSSCase;
-          (* make it first update t2, then update t1 *)
-          rewrite -> thds_update_permute.
+  Case "EV_Write". (* evt1 : Write *)
+    assert (mem' = mem_update mem x n /\ lks = lks').
+      eapply sc_event_write; apply H6.
+    inv H.
+    event_cases (induction evt2) SCase;
+      (* make it first update t2, then update t1 *)
+      rewrite -> thds_update_permute.
 
-        SSSCase "EV_Read". (* evt1 : Write / evt2 : Read *)
-          destruct (eq_var_dec x x0); subst.
-          assert (conflict (EV_Write x0 n) (EV_Read x0)) by auto.
-          apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
+    SCase "EV_Read". (* evt1 : Write / evt2 : Read *)
+      destruct (eq_var_dec x x0); subst.
+      assert (conflict (EV_Write x0 n) (EV_Read x0)) by auto.
+      apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
 
-          assert (mem_update mem x n = mem'0 /\ lks' = lks'0).
-            eapply sc_event_read; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem lks'0); split.
-          rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)... auto.
-          apply CFGSC_One with (thds t1)... auto.
+      assert (mem_update mem x n = mem'0 /\ lks' = lks'0).
+        eapply sc_event_read; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem lks'0); split.
+      rewrite -> thds_update_neq in H14.
+      apply CFGSC with (thds t2)... auto.
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Write". (* evt1 : Write / evt2 : Write *)
-          destruct (eq_var_dec x x0); subst.
-          assert (conflict (EV_Write x0 n) (EV_Write x0 n0)) by auto.
-          apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
+    SCase "EV_Write". (* evt1 : Write / evt2 : Write *)
+      destruct (eq_var_dec x x0); subst.
+      assert (conflict (EV_Write x0 n) (EV_Write x0 n0)) by auto.
+      apply Hcfl in H; invf H. (* x = x0, evt1 & evt2 conflict *)
 
-          assert (mem'0 = mem_update (mem_update mem x n) x0 n0 /\ lks' = lks'0).
-            eapply sc_event_write; apply H14.
-          inv H.
-          rewrite -> mem_update_permute.
-          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem x0 n0) lks'0); split.
-          rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)...
-          eapply write_context_invariance; apply H14. auto.
-          apply CFGSC_One with (thds t1)...
-          eapply write_context_invariance; apply H6. auto. auto.
+      assert (mem'0 = mem_update (mem_update mem x n) x0 n0 /\ lks' = lks'0).
+        eapply sc_event_write; apply H14.
+      inv H.
+      rewrite -> mem_update_permute.
+      exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem x0 n0) lks'0); split.
+      rewrite -> thds_update_neq in H14.
+      apply CFGSC with (thds t2)...
+      eapply write_context_invariance; apply H14. auto.
+      apply CFGSC with (thds t1)...
+      eapply write_context_invariance; apply H6. auto. auto.
 
-        SSSCase "EV_Lock". (* evt1 : Write / evt2 : Lock *)
-          assert (mem_update mem x n = mem'0 /\ lks'0 = lock lks' t2 l).
-            eapply sc_event_lock; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem (lock lks' t2 l)); split.
-          rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)...
-          eapply lock_context_invariance_mem; apply H14. auto.
-          apply CFGSC_One with (thds t1)...
-          eapply write_context_invariance; apply H6. auto.
+    SCase "EV_Lock". (* evt1 : Write / evt2 : Lock *)
+      assert (mem_update mem x n = mem'0 /\ lks'0 = lock lks' t2 l).
+        eapply sc_event_lock; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem (lock lks' t2 l)); split.
+      rewrite -> thds_update_neq in H14.
+      apply CFGSC with (thds t2)...
+      eapply lock_context_invariance_mem; apply H14. auto.
+      apply CFGSC with (thds t1)...
+      eapply write_context_invariance; apply H6. auto.
 
-        SSSCase "EV_Unlock". (* evt1 : Write / evt2 : Unlock *)
-          assert (mem_update mem x n = mem'0 /\ lks'0 = unlock lks' l).
-            eapply sc_event_unlock; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem (unlock lks' l)); split.
-          rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)...
-          eapply unlock_context_invariance_mem; apply H14. auto.
-          apply CFGSC_One with (thds t1)...
-          eapply write_context_invariance; apply H6. auto.
+    SCase "EV_Unlock". (* evt1 : Write / evt2 : Unlock *)
+      assert (mem_update mem x n = mem'0 /\ lks'0 = unlock lks' l).
+        eapply sc_event_unlock; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem (unlock lks' l)); split.
+      rewrite -> thds_update_neq in H14.
+      apply CFGSC with (thds t2)...
+      eapply unlock_context_invariance_mem; apply H14. auto.
+      apply CFGSC with (thds t1)...
+      eapply write_context_invariance; apply H6. auto.
 
-        SSSCase "EV_None". (* evt1 : Write / evt2 : None *)
-          assert (mem_update mem x n = mem'0 /\ lks' = lks'0).
-            eapply sc_event_none; apply H14.
-          inv H.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem lks'0); split.
-          rewrite -> thds_update_neq in H14.
-          apply CFGSC_One with (thds t2)...
-          eapply none_context_invariance; apply H14. auto.
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_None". (* evt1 : Write / evt2 : None *)
+      assert (mem_update mem x n = mem'0 /\ lks' = lks'0).
+        eapply sc_event_none; apply H14.
+      inv H.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem lks'0); split.
+      rewrite -> thds_update_neq in H14.
+      apply CFGSC with (thds t2)...
+      eapply none_context_invariance; apply H14. auto.
+      apply CFGSC with (thds t1)... auto.
 
-      SSCase "EV_Lock". (* evt1 : Lock *)
-        assert (mem = mem' /\ lks' = lock lks t1 l).
-          eapply sc_event_lock; apply H6.
-        inv H.
-        event_cases (induction evt2) SSSCase;
-          (* make it first update t2, then update t1 *)
-          rewrite -> thds_update_permute.
+  Case "EV_Lock". (* evt1 : Lock *)
+    assert (mem = mem' /\ lks' = lock lks t1 l).
+      eapply sc_event_lock; apply H6.
+    inv H.
+    event_cases (induction evt2) SCase;
+      (* make it first update t2, then update t1 *)
+      rewrite -> thds_update_permute.
 
-        SSSCase "EV_Read". (* evt1 : Lock / evt2 : Read *)
-          assert (mem' = mem'0 /\ lock lks t1 l = lks'0).
-            eapply sc_event_read; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply read_context_invariance_lks...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_Read". (* evt1 : Lock / evt2 : Read *)
+      assert (mem' = mem'0 /\ lock lks t1 l = lks'0).
+        eapply sc_event_read; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
+      apply CFGSC with (thds t2)...
+      eapply read_context_invariance_lks...
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Write". (* evt1 : Lock / evt2 : Write *)
-          assert (mem'0 = mem_update mem' x n /\ lock lks t1 l = lks'0).
-            eapply sc_event_write; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply write_context_invariance; apply H14.
-          apply CFGSC_One with (thds t1)...
-          eapply lock_context_invariance_mem; apply H6. auto.
+    SCase "EV_Write". (* evt1 : Lock / evt2 : Write *)
+      assert (mem'0 = mem_update mem' x n /\ lock lks t1 l = lks'0).
+        eapply sc_event_write; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks); split.
+      apply CFGSC with (thds t2)...
+      eapply write_context_invariance; apply H14.
+      apply CFGSC with (thds t1)...
+      eapply lock_context_invariance_mem; apply H6. auto.
 
-        SSSCase "EV_Lock". (* evt1 : Lock / evt2 : Lock *)
-          destruct (eq_lid_dec l l0); subst.
-          assert (conflict (EV_Lock l0) (EV_Lock l0)) by auto.
-          apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
+    SCase "EV_Lock". (* evt1 : Lock / evt2 : Lock *)
+      destruct (eq_lid_dec l l0); subst.
+      assert (conflict (EV_Lock l0) (EV_Lock l0)) by auto.
+      apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
 
-          assert (mem' = mem'0 /\ lks'0 = lock (lock lks t1 l) t2 l0).
-            eapply sc_event_lock; apply H14.
-          inv H.
-          unfold lock; rewrite -> lks_update_permute.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 (Some t2))); split.
-          apply CFGSC_One with (thds t2)...
-          rewrite -> thds_update_neq in H14...
-          eapply lock_context_invariance_lks_less...
-          apply CFGSC_One with (thds t1)...
-          eapply lock_context_invariance_lks_more... auto. auto.
+      assert (mem' = mem'0 /\ lks'0 = lock (lock lks t1 l) t2 l0).
+        eapply sc_event_lock; apply H14.
+      inv H.
+      unfold lock; rewrite -> lks_update_permute.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 (Some t2))); split.
+      apply CFGSC with (thds t2)...
+      rewrite -> thds_update_neq in H14...
+      eapply lock_context_invariance_lks_less...
+      apply CFGSC with (thds t1)...
+      eapply lock_context_invariance_lks_more... auto. auto.
 
-        SSSCase "EV_Unlock". (* evt1 : Lock / evt2 : Unlock *)
-          destruct (eq_lid_dec l l0); subst.
-          assert (conflict (EV_Lock l0) (EV_Unlock l0)) by auto.
-          apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
+    SCase "EV_Unlock". (* evt1 : Lock / evt2 : Unlock *)
+      destruct (eq_lid_dec l l0); subst.
+      assert (conflict (EV_Lock l0) (EV_Unlock l0)) by auto.
+      apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
 
-          assert (mem' = mem'0 /\ lks'0 = unlock (lock lks t1 l) l0).
-            eapply sc_event_unlock; apply H14.
-          inv H.
-          unfold unlock, lock; rewrite -> lks_update_permute.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 None)); split.
-          apply CFGSC_One with (thds t2)...
-          rewrite -> thds_update_neq in H14...
-          eapply unlock_context_invariance_lks_less...
-          apply CFGSC_One with (thds t1)...
-          eapply lock_context_invariance_lks_more... auto. auto.
+      assert (mem' = mem'0 /\ lks'0 = unlock (lock lks t1 l) l0).
+        eapply sc_event_unlock; apply H14.
+      inv H.
+      unfold unlock, lock; rewrite -> lks_update_permute.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 None)); split.
+      apply CFGSC with (thds t2)...
+      rewrite -> thds_update_neq in H14...
+      eapply unlock_context_invariance_lks_less...
+      apply CFGSC with (thds t1)...
+      eapply lock_context_invariance_lks_more... auto. auto.
 
-        SSSCase "EV_None". (* evt1 : Lock / evt2 : None *)
-          assert (mem' = mem'0 /\ lock lks t1 l = lks'0).
-            eapply sc_event_none; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply none_context_invariance...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_None". (* evt1 : Lock / evt2 : None *)
+      assert (mem' = mem'0 /\ lock lks t1 l = lks'0).
+        eapply sc_event_none; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
+      apply CFGSC with (thds t2)...
+      eapply none_context_invariance...
+      apply CFGSC with (thds t1)... auto.
 
-      SSCase "EV_Unlock". (* evt1 : Unlock *)
-        assert (mem = mem' /\ lks' = unlock lks l).
-          eapply sc_event_unlock; apply H6.
-        inv H.
-        event_cases (induction evt2) SSSCase;
-          (* make it first update t2, then update t1 *)
-          rewrite -> thds_update_permute.
+  Case "EV_Unlock". (* evt1 : Unlock *)
+    assert (mem = mem' /\ lks' = unlock lks l).
+      eapply sc_event_unlock; apply H6.
+    inv H.
+    event_cases (induction evt2) SCase;
+      (* make it first update t2, then update t1 *)
+      rewrite -> thds_update_permute.
 
-        SSSCase "EV_Read". (* evt1 : Unlock / evt2 : Read *)
-          assert (mem' = mem'0 /\ unlock lks l = lks'0).
-            eapply sc_event_read; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply read_context_invariance_lks...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_Read". (* evt1 : Unlock / evt2 : Read *)
+      assert (mem' = mem'0 /\ unlock lks l = lks'0).
+        eapply sc_event_read; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
+      apply CFGSC with (thds t2)...
+      eapply read_context_invariance_lks...
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Write". (* evt1 : Unlock / evt2 : Write *)
-          assert (mem'0 = mem_update mem' x n /\ unlock lks l = lks'0).
-            eapply sc_event_write; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply write_context_invariance...
-          apply CFGSC_One with (thds t1)...
-          eapply unlock_context_invariance_mem... auto.
+    SCase "EV_Write". (* evt1 : Unlock / evt2 : Write *)
+      assert (mem'0 = mem_update mem' x n /\ unlock lks l = lks'0).
+        eapply sc_event_write; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks); split.
+      apply CFGSC with (thds t2)...
+      eapply write_context_invariance...
+      apply CFGSC with (thds t1)...
+      eapply unlock_context_invariance_mem... auto.
 
-        SSSCase "EV_Lock". (* evt1 : Unlock / evt2 : Lock *)
-          destruct (eq_lid_dec l l0); subst.
-          assert (conflict (EV_Unlock l0) (EV_Lock l0)) by auto.
-          apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
+    SCase "EV_Lock". (* evt1 : Unlock / evt2 : Lock *)
+      destruct (eq_lid_dec l l0); subst.
+      assert (conflict (EV_Unlock l0) (EV_Lock l0)) by auto.
+      apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
 
-          assert (mem' = mem'0 /\ lks'0 = lock (unlock lks l) t2 l0).
-            eapply sc_event_lock; apply H14.
-          inv H.
-          unfold lock, unlock; rewrite -> lks_update_permute.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 (Some t2))); split.
-          apply CFGSC_One with (thds t2)...
-          eapply lock_context_invariance_lks_less...
-          apply CFGSC_One with (thds t1)...
-          eapply unlock_context_invariance_lks_more... auto. auto.
+      assert (mem' = mem'0 /\ lks'0 = lock (unlock lks l) t2 l0).
+        eapply sc_event_lock; apply H14.
+      inv H.
+      unfold lock, unlock; rewrite -> lks_update_permute.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 (Some t2))); split.
+      apply CFGSC with (thds t2)...
+      eapply lock_context_invariance_lks_less...
+      apply CFGSC with (thds t1)...
+      eapply unlock_context_invariance_lks_more... auto. auto.
 
-        SSSCase "EV_Unlock". (* evt1 : Unlock / evt2 : Unlock *)
-          destruct (eq_lid_dec l l0); subst.
-          assert (conflict (EV_Unlock l0) (EV_Unlock l0)) by auto.
-          apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
+    SCase "EV_Unlock". (* evt1 : Unlock / evt2 : Unlock *)
+      destruct (eq_lid_dec l l0); subst.
+      assert (conflict (EV_Unlock l0) (EV_Unlock l0)) by auto.
+      apply Hcfl in H; invf H. (* l = l0, evt1 & evt2 conflict *)
 
-          assert (mem' = mem'0 /\ lks'0 = unlock (unlock lks l) l0).
-            eapply sc_event_unlock; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          unfold unlock; rewrite -> lks_update_permute.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 None)); split.
-          apply CFGSC_One with (thds t2)...
-          eapply unlock_context_invariance_lks_less...
-          apply CFGSC_One with (thds t1)...
-          eapply unlock_context_invariance_lks_more... auto. auto.
+      assert (mem' = mem'0 /\ lks'0 = unlock (unlock lks l) l0).
+        eapply sc_event_unlock; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      unfold unlock; rewrite -> lks_update_permute.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lks_update lks l0 None)); split.
+      apply CFGSC with (thds t2)...
+      eapply unlock_context_invariance_lks_less...
+      apply CFGSC with (thds t1)...
+      eapply unlock_context_invariance_lks_more... auto. auto.
 
-        SSSCase "EV_None". (* evt1 : Unlock / evt2 : None *)
-          assert (mem' = mem'0 /\ unlock lks l = lks'0).
-            eapply sc_event_none; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
-          apply CFGSC_One with (thds t2)...
-          eapply none_context_invariance...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_None". (* evt1 : Unlock / evt2 : None *)
+      assert (mem' = mem'0 /\ unlock lks l = lks'0).
+        eapply sc_event_none; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks); split.
+      apply CFGSC with (thds t2)...
+      eapply none_context_invariance...
+      apply CFGSC with (thds t1)... auto.
 
-      SSCase "EV_None". (* evt1 : None *)
-        assert (mem = mem' /\ lks = lks').
-          eapply sc_event_none; apply H6.
-        inv H.
-        event_cases (induction evt2) SSSCase;
-          (* make it first update t2, then update t1 *)
-          rewrite -> thds_update_permute.
+  Case "EV_None". (* evt1 : None *)
+    assert (mem = mem' /\ lks = lks').
+      eapply sc_event_none; apply H6.
+    inv H.
+    event_cases (induction evt2) SSSCase;
+      (* make it first update t2, then update t1 *)
+      rewrite -> thds_update_permute.
 
-        SSSCase "EV_Read". (* evt1 : None / evt2 : Read *)
-          assert (mem' = mem'0 /\ lks' = lks'0).
-            eapply sc_event_read; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
-          apply CFGSC_One with (thds t2)...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_Read". (* evt1 : None / evt2 : Read *)
+      assert (mem' = mem'0 /\ lks' = lks'0).
+        eapply sc_event_read; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
+      apply CFGSC with (thds t2)...
+      apply CFGSC with (thds t1)... auto.
 
-        SSSCase "EV_Write". (* evt1 : None / evt2 : Write *)
-          assert (mem'0 = mem_update mem' x n /\ lks' = lks'0).
-            eapply sc_event_write; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14.
-          exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks'0); split.
-          apply CFGSC_One with (thds t2)...
-          apply CFGSC_One with (thds t1)...
-          eapply none_context_invariance... auto. auto.
+    SCase "EV_Write". (* evt1 : None / evt2 : Write *)
+      assert (mem'0 = mem_update mem' x n /\ lks' = lks'0).
+        eapply sc_event_write; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14.
+      exists (CFG tids (thds_update thds t2 c'0) bufs (mem_update mem' x n) lks'0); split.
+      apply CFGSC with (thds t2)...
+      apply CFGSC with (thds t1)...
+      eapply none_context_invariance... auto. auto.
 
-        SSSCase "EV_Lock". (* evt1 : None / evt2 : Lock" *)
-          assert (mem' = mem'0 /\ lks'0 = lock lks' t2 l).
-            eapply sc_event_lock; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14.
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lock lks' t2 l)); split.
-          apply CFGSC_One with (thds t2)...
-          apply CFGSC_One with (thds t1)...
-          eapply none_context_invariance... auto. auto.
+    SCase "EV_Lock". (* evt1 : None / evt2 : Lock" *)
+      assert (mem' = mem'0 /\ lks'0 = lock lks' t2 l).
+        eapply sc_event_lock; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14.
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (lock lks' t2 l)); split.
+      apply CFGSC with (thds t2)...
+      apply CFGSC with (thds t1)...
+      eapply none_context_invariance... auto. auto.
 
-        SSSCase "EV_Unlock". (* evt1 : None / evt2 : Unlock *)
-          assert (mem' = mem'0 /\ lks'0 = unlock lks' l).
-            eapply sc_event_unlock; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (unlock lks' l)); split.
-          apply CFGSC_One with (thds t2)...
-          apply CFGSC_One with (thds t1)...
-          eapply none_context_invariance... auto.
+    SCase "EV_Unlock". (* evt1 : None / evt2 : Unlock *)
+      assert (mem' = mem'0 /\ lks'0 = unlock lks' l).
+        eapply sc_event_unlock; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 (unlock lks' l)); split.
+      apply CFGSC with (thds t2)...
+      apply CFGSC with (thds t1)...
+      eapply none_context_invariance... auto.
 
-        SSSCase "EV_None". (* evt1 : None / evt2 : None *)
-          assert (mem' = mem'0 /\ lks' = lks'0).
-            eapply sc_event_none; apply H14.
-          inv H.
-          rewrite -> thds_update_neq in H14...
-          exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
-          apply CFGSC_One with (thds t2)...
-          apply CFGSC_One with (thds t1)... auto.
+    SCase "EV_None". (* evt1 : None / evt2 : None *)
+      assert (mem' = mem'0 /\ lks' = lks'0).
+        eapply sc_event_none; apply H14.
+      inv H.
+      rewrite -> thds_update_neq in H14...
+      exists (CFG tids (thds_update thds t2 c'0) bufs mem'0 lks'0); split.
+      apply CFGSC with (thds t2)...
+      apply CFGSC with (thds t1)... auto.
 Qed.
 (* ---------------- end of Diamond Lemma ---------------- *)
 
