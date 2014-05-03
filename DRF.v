@@ -10,7 +10,7 @@ Table of Contents:
 
 Require Import XLib.
 Require Import Basics.
-Require Import TSO_new.
+Require Import TSO.
 Require Import SC.
 
 
