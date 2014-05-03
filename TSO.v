@@ -167,31 +167,63 @@ Qed.
 Reserved Notation "cfg1 '-->' cfg2 '[[' tevt ']]'" (at level 60).
 
 Inductive cfgtso : configuration -> configuration -> (tid * event) -> Prop :=
-(* One thread already ends its job, thus remove it *)
-| CFGTSO_Done : forall t tids thds bufs mem lks,
-                  in_tids t tids = true ->
-                  thds t = SKIP ->
-                  bufs t = nil ->
-                  (CFG tids thds bufs mem lks) --> (CFG (remove_tid t tids) thds bufs mem lks)
-                                               [[(t, EV_None)]]
-
 (* One thread can move one step forward, in terms of "state" *)
-| CFGTSO_One : forall t tids thds bufs c c' b b' mem mem' lks lks' evt,
-                 in_tids t tids = true ->
-                 thds t = c ->
-                 bufs t = b ->
-                 t @ (ST c b mem lks) ==> (ST c' b' mem' lks') [[evt]] ->
-                 (CFG tids thds bufs mem lks) -->
-                 (CFG tids (thds_update thds t c') (bufs_update bufs t b') mem' lks')
-                 [[(t, evt)]]
+| CFGTSO : forall t tids thds bufs c c' b b' mem mem' lks lks' evt,
+             in_tids t tids = true ->
+             thds t = c ->
+             bufs t = b ->
+             t @ (ST c b mem lks) ==> (ST c' b' mem' lks') [[evt]] ->
+             (CFG tids thds bufs mem lks) -->
+               (CFG tids (thds_update thds t c') (bufs_update bufs t b') mem' lks')
+               [[(t, evt)]]
 
 where "cfg1 '-->' cfg2 '[[' tevt ']]'" := (cfgtso cfg1 cfg2 tevt).
 
 Hint Constructors cfgtso.
 
-Tactic Notation "cfgtso_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "CFGTSO_Done" | Case_aux c "CFGTSO_One" ].
+
+Theorem strong_progress_cfgtso :
+  forall tids thds bufs mem lks,
+    cfg_normal_form (CFG tids thds bufs mem lks) \/
+    exists cfg' t evt, (CFG tids thds bufs mem lks) --> cfg' [[(t, evt)]].
+Proof with eauto.
+  intros tids.
+  induction tids as [ | hd tl];
+    intros.
+  Case "tids = nil".
+    left; constructor.
+    intros.
+    invf H.
+  Case "tids = hd :: tl".
+    destruct (IHtl thds bufs mem lks); clear IHtl.
+    SCase "all other threads are in normal_form".
+      inv H.
+      assert (st_normal_form hd (ST (thds hd) (bufs hd) mem lks) \/
+              (exists st' evt, hd @ (ST (thds hd) (bufs hd) mem lks) ==> st' [[evt]])) by eauto.
+      inv H.
+      SSCase "thread hd is in normal_form".
+        left; constructor; intros.
+        destruct (eq_tid_dec t hd); subst.
+        auto.
+        simpl in H; rewrite -> neq_tid in H...
+      SSCase "thread hd is not in normal_form".
+        inv H0; inv H.
+        rename x0 into evt; destruct x.
+        right.
+        eexists; exists hd; exists evt.
+        apply CFGTSO with (thds hd) (bufs hd).
+        simpl... auto. auto.
+        apply H0.
+    SCase "some other thread is not in normal_form".
+      inv H; inv H0; inv H; inv H0.
+      rename x0 into t; rename x1 into evt.
+      right; eexists; exists t; exists evt.
+      apply CFGTSO with (thds t) (bufs t).
+      simpl; destruct (eq_tid_dec t hd)... auto. auto.
+      apply H11.
+Qed.
+
+(* For deterministic, multi-threaded semantics is definitely not deterministic *)
 
 
 Definition multicfgtso := multi cfgtso.
@@ -248,11 +280,11 @@ Qed.
 (* The following is to prove that the final state is actually
 reachable by the language and semantics defined above. *)
 Theorem tso_semantics:
-  exists thds bufs mem lks trc,
-    init_cfg codes -->* (CFG empty_tids thds bufs mem lks) [[trc]] /\
-    cfg_normal_form (CFG empty_tids thds bufs mem lks) /\ (* final state *)
+  exists tids thds bufs mem lks trc,
+    init_cfg codes -->* (CFG tids thds bufs mem lks) [[trc]] /\
     mem EAX = 1 /\ mem EBX = 0 /\ mem X = 1.
 Proof with eauto.
+  eexists.
   eexists.
   eexists.
   eexists.
@@ -262,77 +294,73 @@ Proof with eauto.
 
   (* proc1: write of Y := 2 is buffered *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T1) (c := proc1) (b := nil)...
+  apply CFGTSO with (t := T1) (c := proc1) (b := nil)...
   unfold proc1...
   eapply multi_step.
-  apply CFGTSO_One with (t := T1) (c := (SKIP;; X ::= (ANum 2))) (b := [(Y, 2)])...
+  apply CFGTSO with (t := T1) (c := (SKIP;; X ::= (ANum 2))) (b := [(Y, 2)])...
 
   (* proc0: write of X := 1 is buffered *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := proc0) (b := nil)...
+  apply CFGTSO with (t := T0) (c := proc0) (b := nil)...
   unfold proc0...
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (SKIP;; EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+  apply CFGTSO with (t := T0) (c := (SKIP;; EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
 
   (* proc0: read EAX := X from write buffer *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+  apply CFGTSO with (t := T0) (c := (EAX ::= (AVar X) ;; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
   constructor.
   constructor.
   constructor.
   reflexivity.
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (EAX ::= (ANum 1);; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
+  apply CFGTSO with (t := T0) (c := (EAX ::= (ANum 1);; (EBX ::= (AVar Y)))) (b := [(X, 1)])...
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (SKIP;; (EBX ::= (AVar Y)))) (b := [(X, 1); (EAX, 1)])...
+  apply CFGTSO with (t := T0) (c := (SKIP;; (EBX ::= (AVar Y)))) (b := [(X, 1); (EAX, 1)])...
 
   (* proc0: read EBX := Y from memory *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (EBX ::= (AVar Y))) (b := [(X, 1); (EAX, 1)])...
+  apply CFGTSO with (t := T0) (c := (EBX ::= (AVar Y))) (b := [(X, 1); (EAX, 1)])...
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := (EBX ::= (ANum 0))) (b := [(X, 1); (EAX, 1)])...
+  apply CFGTSO with (t := T0) (c := (EBX ::= (ANum 0))) (b := [(X, 1); (EAX, 1)])...
   (* after this, proc0: c := SKIP, b := (X, 1) :: (EAX, 1) :: (EBX, 0) :: nil *)
 
   (* proc1: write of X := 2 buffered *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T1) (c := (X ::= (ANum 2))) (b := [(Y, 2)])...
+  apply CFGTSO with (t := T1) (c := (X ::= (ANum 2))) (b := [(Y, 2)])...
   (* after this, proc1: c := SKIP, b := (Y, 2) :: (X, 2) :: nil *)
 
   (* proc1: flushes write Y := 2 to memory *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T1) (c := SKIP) (b := [(Y, 2); (X, 2)])...
+  apply CFGTSO with (t := T1) (c := SKIP) (b := [(Y, 2); (X, 2)])...
   constructor.
   simpl...
 
   (* proc1: flushes write X := 2 to memory *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T1) (c := SKIP) (b := [(X, 2)])...
+  apply CFGTSO with (t := T1) (c := SKIP) (b := [(X, 2)])...
   constructor.
   simpl...
 
   (* proc1: done *)
-  eapply multi_step.
-  apply CFGTSO_Done with (t := T1)...
 
   (* proc0: flushes write X := 1 to memory *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := SKIP) (b := [(X, 1); (EAX, 1); (EBX, 0)])...
+  apply CFGTSO with (t := T0) (c := SKIP) (b := [(X, 1); (EAX, 1); (EBX, 0)])...
   constructor.
   simpl...
 
   (* proc0: flushes all else in the write buffer to memory *)
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := SKIP) (b := [(EAX, 1); (EBX, 0)])...
+  apply CFGTSO with (t := T0) (c := SKIP) (b := [(EAX, 1); (EBX, 0)])...
   constructor.
   simpl...
   eapply multi_step.
-  apply CFGTSO_One with (t := T0) (c := SKIP) (b := [(EBX, 0)])...
+  apply CFGTSO with (t := T0) (c := SKIP) (b := [(EBX, 0)])...
   constructor.
   simpl...
 
   (* proc0: done *)
-  eapply multi_step.
-  apply CFGTSO_Done with (t := T0)...
 
   (* DONE, now the final state is: EAX = 1 /\ EBX = 0 /\ X = 1 *)
   apply multi_refl.

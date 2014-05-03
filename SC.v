@@ -166,30 +166,79 @@ Qed.
 Reserved Notation "cfg1 '--SC>' cfg2 '[[' tevt ']]'" (at level 60).
 
 Inductive cfgsc : configuration -> configuration -> (tid * event) -> Prop :=
-(* One thread already ends its job, thus remove it *)
-| CFGSC_Done : forall t tids thds bufs mem lks,
-                 in_tids t tids = true ->
-                 thds t = SKIP ->
-                 bufs t = nil ->
-                 (CFG tids thds bufs mem lks) --SC> (CFG (remove_tid t tids) thds bufs mem lks)
-                                                      [[(t, EV_None)]]
-
 (* One thread can move one step forward, in terms of "state" *)
-| CFGSC_One : forall t tids thds bufs c c' mem mem' lks lks' evt,
-                in_tids t tids = true ->
-                thds t = c ->
-                bufs t = nil ->
-                t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[evt]] ->
-                (CFG tids thds bufs mem lks) --SC>
-                  (CFG tids (thds_update thds t c') bufs mem' lks') [[(t, evt)]]
+| CFGSC : forall t tids thds bufs c c' mem mem' lks lks' evt,
+            in_tids t tids = true ->
+            thds t = c ->
+            bufs t = nil ->
+(* here buffers is not empty_buffer because "flattening" may change a
+TSO cfg to a SC cfg, at that time buffers is not exactly the same as
+"empty_buffer" *)
+            t @ (ST c nil mem lks) ==SC> (ST c' nil mem' lks') [[evt]] ->
+            (CFG tids thds bufs mem lks) --SC>
+            (CFG tids (thds_update thds t c') bufs mem' lks') [[(t, evt)]]
 
 where "cfg1 '--SC>' cfg2 '[[' tevt ']]'" := (cfgsc cfg1 cfg2 tevt).
 
 Hint Constructors cfgsc.
 
-Tactic Notation "cfgsc_cases" tactic(first) ident(c) :=
-  first;
-  [ Case_aux c "CFGSC_Done" | Case_aux c "CFGSC_One" ].
+
+Lemma no_buffer_equiv_empty_buffer :
+  forall bufs,
+    (forall t, bufs t = []) ->
+    bufs = empty_buffers.
+Proof with auto.
+  intros.
+  apply functional_extensionality.
+  intros.
+  rewrite -> H.
+  unfold empty_buffers...
+Qed.
+
+
+Theorem strong_progress_cfgsc :
+  forall tids thds bufs mem lks,
+    (forall t, bufs t = []) -> (* this is to ensure that there is no write buffers *)
+    cfg_normal_form (CFG tids thds bufs mem lks) \/
+    exists cfg' t evt, (CFG tids thds bufs mem lks) --SC> cfg' [[(t, evt)]].
+Proof with eauto.
+  intros tids.
+  induction tids as [ | hd tl];
+    intros.
+  Case "tids = nil".
+    left; constructor.
+    intros.
+    invf H0.
+  Case "tids = hd :: tl".
+    destruct (IHtl thds bufs mem lks); clear IHtl...
+    SCase "all other threads are in normal_form".
+      inv H0.
+      assert (st_normal_form hd (ST (thds hd) nil mem lks) \/
+              (exists st' evt, hd @ (ST (thds hd) nil mem lks) ==SC> st' [[evt]])) by eauto.
+      inv H0.
+      SSCase "thread hd is in normal_form".
+        left; constructor; intros.
+        destruct (eq_tid_dec t hd); subst.
+        rewrite -> no_buffer_equiv_empty_buffer with bufs...
+        simpl in H0; rewrite -> neq_tid in H0...
+      SSCase "thread hd is not in normal_form".
+        inv H1; inv H0.
+        rename x0 into evt; destruct x.
+        right.
+        eexists; exists hd; exists evt.
+        apply CFGSC with (thds hd).
+        simpl... auto. auto.
+        assert (st_buf = []) by eauto. inv H0.
+        apply H1.
+    SCase "some other thread is not in normal_form".
+      inv H0; inv H1; inv H0; inv H1.
+      rename x0 into t; rename x1 into evt.
+      right; eexists; exists t; exists evt.
+      rewrite -> no_buffer_equiv_empty_buffer with bufs; auto.
+      apply CFGSC with (thds t).
+      simpl; destruct (eq_tid_dec t hd)... auto. auto.
+      apply H12.
+Qed.
 
 
 Definition multicfgsc := multi cfgsc.

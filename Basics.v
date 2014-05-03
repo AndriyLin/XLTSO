@@ -947,17 +947,11 @@ Definition empty_configuration :=
 
 
 Inductive cfg_normal_form : configuration -> Prop :=
-(* All threads finish *)
-| CFGV_End : forall thds bufs mem lks,
-               cfg_normal_form (CFG empty_tids thds bufs mem lks)
-(* Deadlock *)
-| CFGV_Deadlock: forall tids thds bufs mem lks,
-                   (forall t c b, in_tids t tids = true ->
-                                  thds t = c ->
-                                  bufs t = b ->
-                                  waiting t (ST c b mem lks)) ->
-                   cfg_normal_form (CFG tids thds bufs mem lks)
-.
+(* Every thread is in normal_form *)
+| CFGNF_Each : forall tids thds bufs mem lks,
+                 (forall t, in_tids t tids = true ->
+                            st_normal_form t (ST (thds t) (bufs t) mem lks)) ->
+                 cfg_normal_form (CFG tids thds bufs mem lks).
 
 Hint Constructors cfg_normal_form.
 
