@@ -132,8 +132,9 @@ Hint Resolve drf_preservation.
 (* ---------------- Diamond Lemma ---------------- *)
 
 (* Whether 2 consecutive events of different tids in a trace can be
-simply swapped. LOCK & UNLOCK are considered to be "write"
-operations. *)
+simply swapped. The rules are copied from paper "Relaxed Memory
+Models: an Operational Approach" (Definition 3.4). LOCK & UNLOCK are
+considered to be "write" operations. *)
 Inductive conflict : event -> event -> Prop :=
 | CFL_WrWr : forall x n1 n2,
                conflict (EV_Write x n1) (EV_Write x n2)
@@ -249,7 +250,13 @@ Qed.
 Hint Resolve remove_then_neq.
 
 (* TODO: I used Axiom here because I failed to prove it as a theorem.
- This will be used in lemma tids_irrelevant! *)
+ This will be used in lemma tids_irrelevant!
+
+One way to eliminate this axiom is to modify the definition of
+CFGSC/CFGTSO to make it only has XX_One, no more XX_End, then in
+cfg_normal_form, instead of just checking tid set empty, check that
+in_tids -> thds t = SKIP /\ bufs t = nil.
+ *)
 Axiom thds_update_exact_equiv :
   forall thds t1 c1 t2 c2,
     thds_update thds t1 c1 = thds_update thds t2 c2 ->
