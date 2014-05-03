@@ -1449,6 +1449,13 @@ At the very beginning, given (t1, evt1) :: trcm ++ [(t2, evt2)], first
 reconstruct the trace such to the form of trcl :: (t1, evt1) :: trcm'
 ++ (tr, evt2) :: trcr such that in trcm', every consecutive pair
 conflict (if not, it will get swapped). Then induction on trcm'.
+
+Or, change the "list (tid * event)" to "vector"?
+
+Or, as the paper suggests, by induction on the length of trcm?  Maybe
+this will work, but I have to prepare for the finals now.
+
+Before retrying, read the complete proof in the paper first!!
 *)
 Admitted.
 (* ---------------- end of DRF -> Well-Synchronized ---------------- *)
