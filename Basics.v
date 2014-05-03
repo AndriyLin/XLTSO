@@ -282,6 +282,15 @@ Definition empty_locks : lock_status :=
 Definition lks_update (st : lock_status) (l : lid) (v : option tid) : lock_status :=
   fun l' => if eq_lid_dec l l' then v else st l'.
 
+Theorem lks_update_eq :
+  forall l v lks,
+    lks_update lks l v l = v.
+Proof with auto.
+  intros.
+  unfold lks_update...
+Qed.
+
+Hint Resolve lks_update_eq.
 
 Theorem lks_update_neq :
   forall l1 l2 v lks,

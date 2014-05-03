@@ -3,6 +3,7 @@
 Table of Contents:
 * Data-Race-Free
 * Diamond Lemma
+* DRF -> Well-Synchronized
 * DRF Guarantee Property
 
 * TODO.. to be numbered
@@ -18,8 +19,8 @@ Require Import SC.
 (* The command determines whether "writes c x" is provable, so just
 assign the most basic context. *)
 Inductive writes : cmd -> var -> Prop :=
-| Writes : forall c st' x n,
-             T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[EV_Write x n]] ->
+| Writes : forall t c mem lks st' x n,
+             t @ (ST c nil mem lks) ==SC> st' [[EV_Write x n]] ->
              writes c x
 .
 
@@ -28,44 +29,12 @@ Hint Constructors writes.
 (* The command determines whether "reads c x" is provable, so just
 assign the most basic context. *)
 Inductive reads : cmd -> var -> Prop :=
-| Reads : forall c st' x,
-            T0 @ (ST c nil empty_memory empty_locks) ==SC> st' [[EV_Read x]] ->
+| Reads : forall t c mem lks st' x,
+            t @ (ST c nil mem lks) ==SC> st' [[EV_Read x]] ->
             reads c x
 .
 
 Hint Constructors reads.
-
-
-Module TestWritesReads.
-
-Example test_writes1 : writes (X ::= ANum 10) X.
-Proof. eauto. Qed.
-
-Example test_writes2 : ~ writes (SKIP ;; X ::= ANum 10) X.
-Proof.
-  intros Hf.
-  inv Hf.
-  inv H.
-  inv H7.
-Qed.
-
-Example test_read1 : reads (IFB (BEq (ANum 10) (AVar X)) THEN SKIP ELSE SKIP FI) X.
-Proof. eauto. Qed.
-
-Example test_read2 : ~ reads (IFB (BEq (AVar Y) (AVar X)) THEN SKIP ELSE SKIP FI) X.
-Proof.
-  intros Hf.
-  inv Hf.
-  inv H.
-  inv H8.
-  inv H5.
-  inv H6.
-  inv H2.
-  inv H3.
-Qed.
-
-End TestWritesReads.
-
 
 Definition uses (c : cmd) (x : var) : Prop :=
   writes c x \/ reads c x.
@@ -780,7 +749,7 @@ Proof with eauto.
   inversion H12; subst.
 (*
 I choose to do case analysis on events, each event can be Read, Write,
-Lock, Unlock, None. So there are 25 cases.. >_<
+Lock, Unlock, or None. So there are 25 cases.. >_<
 
 Generating a Rd event means: mem' = mem /\ lks' = lks
 Generating a Wr event means: mem' = update mem x n /\ lks' = lks
@@ -1116,6 +1085,368 @@ Qed.
 (* ---------------- end of Diamond Lemma ---------------- *)
 
 
+(* ---------------- DRF -> Well-Synchronized ---------------- *)
+
+Lemma trace_segment :
+  forall cfg1 cfg2 tr1 tr2,
+    cfg1 --SC>* cfg2 [[tr1 ++ tr2]] ->
+    exists cfg', cfg1 --SC>* cfg' [[tr1]] /\ cfg' --SC>* cfg2 [[tr2]].
+Proof with eauto.
+  intros cfg1 cfg2 tr1.
+  generalize dependent cfg2; generalize dependent cfg1.
+  induction tr1 as [ | hd1 tl1];
+    intros.
+  Case "tr1 = nil".
+    exists cfg1.
+    simpl in *; split...
+    apply multi_refl.
+  Case "tr1 = hd1 :: tl1".
+    inv H.
+    apply IHtl1 in H5.
+    inv H5; inv H.
+    exists x; split...
+    apply multi_step with y...
+Qed.
+
+Lemma trace_extract :
+  forall cfg1 cfg2 tevt tr,
+    cfg1 --SC>* cfg2 [[tevt :: tr]] ->
+    exists cfg', cfg1 --SC> cfg' [[tevt]] /\ cfg' --SC>* cfg2 [[tr]].
+Proof with eauto.
+  intros.
+  generalize dependent tevt; generalize dependent cfg2;
+  generalize dependent cfg1.
+  induction tr as [ | hd tl];
+    intros.
+  Case "tr = nil".
+    inv H. inv H5.
+    exists cfg2; split...
+    apply multi_refl.
+  Case "tr = hd :: tl".
+    inv H.
+    apply IHtl in H5; inv H5.
+    exists y; split...
+    inv H.
+    eapply multi_step...
+Qed.
+
+
+Lemma sc_preserves_tids :
+  forall tids thds bufs mem lks tids' thds' bufs' mem' lks' tevt,
+    (CFG tids thds bufs mem lks) --SC> (CFG tids' thds' bufs' mem' lks') [[tevt]] ->
+    tids = tids'.
+Proof with eauto.
+  intros.
+  inv H...
+Qed.
+
+Hint Resolve sc_preserves_tids.
+
+Lemma tevt_in_tids :
+  forall trcl trcr tids thds bufs mem lks cfg' t evt,
+    (CFG tids thds bufs mem lks) --SC>* cfg' [[trcl ++ (t, evt) :: trcr]] ->
+    in_tids t tids = true.
+Proof with eauto.
+  intros trcl.
+  induction trcl as [ | hdl tll];
+    intros.
+  Case "trcl = nil".
+    simpl in H.
+    apply trace_extract in H; inv H.
+    inv H0.
+    inv H...
+  Case "trcl = hdl :: tll".
+    inv H.
+    destruct y as [tids' thds' bufs' mem' lks'].
+    apply IHtll in H5.
+    apply sc_preserves_tids in H4.
+    subst...
+Qed.
+
+Hint Resolve tevt_in_tids.
+
+
+Lemma try_to_lock_locked :
+  forall t1 t2 c c' mem mem' lks lks' lk,
+    t1 @ (ST c [] mem (lock lks t2 lk)) ==SC> (ST c' [] mem' lks') [[EV_Lock lk]] ->
+    False.
+Proof with eauto.
+  intros.
+  remember (ST c [] mem (lock lks t2 lk)) as st1.
+  remember (ST c' [] mem' lks') as st2.
+  remember (EV_Lock lk) as evt.
+  generalize dependent t2; generalize dependent c;
+  generalize dependent c'; generalize dependent mem;
+  generalize dependent mem'; generalize dependent lks;
+  generalize dependent lks'; generalize dependent lk.
+  scstep_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H1; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H1; invf H.
+  Case "SC_Lock".
+    unfold lock in H.
+    rewrite -> lks_update_eq in H.
+    invf H.
+Qed.
+
+Lemma try_to_unlock_others_locked :
+  forall t1 t2 c c' mem mem' lks lks' lk,
+    t1 <> t2 ->
+    t1 @ (ST c [] mem (lock lks t2 lk)) ==SC> (ST c' [] mem' lks') [[EV_Unlock lk]] ->
+    False.
+Proof with eauto.
+  intros.
+  remember (ST c [] mem (lock lks t2 lk)) as st1.
+  remember (ST c' [] mem' lks') as st2.
+  remember (EV_Unlock lk) as evt.
+  generalize dependent t2; generalize dependent c;
+  generalize dependent c'; generalize dependent mem;
+  generalize dependent mem'; generalize dependent lks;
+  generalize dependent lks'; generalize dependent lk.
+  scstep_cases (induction H0) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H2; invf H.
+  Case "SC_Unlock".
+    unfold lock in H.
+    rewrite -> lks_update_eq in H.
+    inv H.
+    assert (t = t) as Hf by auto; apply H0 in Hf; invf Hf.
+Qed.
+
+
+Theorem conflict_nor_drf :
+  forall cfg cfgl cfg1 cfg2 trcl t1 t2 evt1 evt2,
+    cfg --SC>* cfgl [[trcl]] ->
+    t1 <> t2 ->
+    cfgl --SC> cfg1 [[(t1, evt1)]] ->
+    cfg1 --SC> cfg2 [[(t2, evt2)]] ->
+    conflict evt1 evt2 ->
+    (forall lk, evt1 <> EV_Unlock lk) -> (* without this, it's not provable *)
+    ~ data_race_free cfg.
+Proof with eauto.
+  intros.
+  intros Hf.
+  destruct cfgl as [tids thds bufs mem lks].
+  assert (in_tids t1 tids = true) as Ht1.
+    apply tevt_in_tids with [] [] thds bufs mem lks cfg1 evt1.
+    eapply multi_step...
+  assert (in_tids t2 tids = true) as Ht2.
+    apply tevt_in_tids with [(t1, evt1)] [] thds bufs mem lks cfg2 evt2.
+    eapply multi_step...
+
+  assert (exists tids thds bufs mem lks t1 t2 trc,
+            cfg --SC>* (CFG tids thds bufs mem lks) [[trc]] /\
+            in_tids t1 tids = true /\
+            in_tids t2 tids = true /\
+            t1 <> t2 /\
+            datarace (thds t1) (thds t2)) as Htt.
+    exists tids; exists thds; exists bufs; exists mem; exists lks;
+    exists t1; exists t2; exists trcl.
+    split; auto.
+    split; auto.
+    split; auto.
+    split; auto.
+    destruct cfg1 as [tids1 thds1 bufs1 mem1 lks1].
+    destruct cfg2 as [tids2 thds2 bufs2 mem2 lks2].
+    inv H1; inv H2.
+    rewrite -> thds_update_neq in H22...
+    conflict_cases (induction H3) Case.
+    Case "CFL_WrWr".
+      assert (mem1 = mem_update mem x n1 /\ lks = lks1).
+        eapply sc_event_write; apply H20.
+      inv H1.
+      assert (mem2 = mem_update (mem_update mem x n1) x n2 /\ lks1 = lks2).
+        eapply sc_event_write; apply H22.
+      inv H1.
+      apply DataRaceL with x.
+      econstructor; apply H20.
+      left; econstructor; apply H22.
+    Case "CFL_WrRd".
+      assert (mem1 = mem_update mem x n /\ lks = lks1).
+        eapply sc_event_write; apply H20.
+      inv H1.
+      assert (mem_update mem x n = mem2 /\ lks1 = lks2).
+        eapply sc_event_read; apply H22.
+      inv H1.
+      apply DataRaceL with x.
+      econstructor; apply H20.
+      right; econstructor; apply H22.
+    Case "CFL_RdWr".
+      assert (mem = mem1 /\ lks = lks1).
+        eapply sc_event_read; apply H20.
+      inv H1.
+      assert (mem2 = mem_update mem1 x n /\ lks1 = lks2).
+        eapply sc_event_write; apply H22.
+      inv H1.
+      apply DataRaceR with x.
+      econstructor; apply H22.
+      right; econstructor; apply H20.
+    Case "CFL_LkLk".
+      assert (mem = mem1 /\ lks1 = lock lks t1 l).
+        eapply sc_event_lock; apply H20.
+      inv H1.
+      apply try_to_lock_locked in H22; invf H22.
+    Case "CFL_LkUn".
+      assert (mem = mem1 /\ lks1 = lock lks t1 l).
+        eapply sc_event_lock; apply H20.
+      inv H1.
+      apply try_to_unlock_others_locked in H22; invf H22...
+    Case "CFL_UnLk".
+      destruct (H4 l)...
+    Case "CFL_UnUn".
+      destruct (H4 l)...
+
+  apply Hf in Htt; invf Htt.
+Qed.
+
+Hint Resolve conflict_nor_drf.
+
+(* This is the weaker version for theorem DRF->WellSynchronized,
+with nothing in between tevt1 & tevt2 *)
+Lemma drf_well_synchronized_weaker :
+  forall cfg cfg' t1 t2 trcl trcr evt1 evt2,
+    data_race_free cfg ->
+    t1 <> t2 ->
+    cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: (t2, evt2) :: trcr]] ->
+    conflict evt1 evt2 ->
+    exists lk, evt1 = EV_Unlock lk.
+Proof with eauto.
+  intros cfg cfg' t1 t2 trcl trcr evt1 evt2 Hdrf Ht12 Hmulti Hcfl.
+  apply trace_segment in Hmulti.
+  inversion Hmulti as [cfgl Hl]; clear Hmulti.
+  inversion Hl as [Hcfgl H12]; clear Hl.
+  apply trace_extract in H12.
+  inversion H12 as [cfg1 H12']; clear H12.
+  inversion H12' as [Ht1 Ht2']; clear H12'.
+  apply trace_extract in Ht2'.
+  inversion Ht2' as [cfg2 H']; clear Ht2'.
+  inversion H' as [Ht2 Hcfgr]; clear H'.
+
+  event_cases (destruct evt1) SCase.
+  SCase "EV_Read".
+    assert (~ data_race_free cfg) as Hf.
+      eapply conflict_nor_drf...
+      intros lk Hf; invf Hf.
+    apply Hf in Hdrf; invf Hdrf.
+  SCase "EV_Write".
+    assert (~ data_race_free cfg) as Hf.
+      eapply conflict_nor_drf...
+      intros lk Hf; invf Hf.
+    apply Hf in Hdrf; invf Hdrf.
+  SCase "EV_Lock".
+    assert (~ data_race_free cfg) as Hf.
+      eapply conflict_nor_drf...
+      intros lk Hf; invf Hf.
+    apply Hf in Hdrf; invf Hdrf.
+  SCase "EV_Unlock".
+    exists l...
+  SCase "EV_None".
+    assert (~ data_race_free cfg) as Hf.
+      eapply conflict_nor_drf...
+      intros lk Hf; invf Hf.
+    apply Hf in Hdrf; invf Hdrf.
+Qed.
+
+Lemma list_rearrange :
+  forall (X : Type) (trcl trcm trcr : list X) (tevt1 tevt3 : X),
+    trcl ++ tevt1 :: tevt3 :: trcm ++ trcr =
+    (trcl ++ [tevt1]) ++ tevt3 :: trcm ++ trcr.
+Proof with auto.
+  intros X trcl.
+  induction trcl as [ | hdl tll];
+    intros; simpl...
+  rewrite -> IHtll...
+Qed.
+
+(* Given a trace generated from a DRF program, if any two events in
+the trace conflict, there must be an Unlock event in the middle
+emitted by the first thread. *)
+Theorem drf_well_synchronized :
+  forall cfg cfg' t1 t2 trcl trcm trcr evt1 evt2,
+    data_race_free cfg ->
+    t1 <> t2 ->
+    cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: trcm ++ (t2, evt2) :: trcr]] ->
+    conflict evt1 evt2 ->
+    exists lk, In (t1, EV_Unlock lk) ((t1, evt1) :: trcm).
+Proof with eauto.
+  intros cfg cfg' t1 t2 trcl trcm trcr evt1 evt2 Hdrf Ht12 Hmulti Hcfl.
+  generalize dependent evt2; generalize dependent evt1;
+  generalize dependent trcr; generalize dependent trcl;
+  generalize dependent t2; generalize dependent t1;
+  generalize dependent cfg'; generalize dependent cfg.
+  induction trcm as [ | hdm tlm];
+    intros.
+  Case "trcm = nil".
+    simpl in Hmulti.
+    assert (exists lk, evt1 = EV_Unlock lk).
+      eapply drf_well_synchronized_weaker...
+    inv H.
+    exists x.
+    left...
+  Case "trcm = hdm :: tlm".
+    simpl in Hmulti.
+    destruct hdm as [t3 evt3].
+    destruct (eq_tid_dec t1 t3); subst.
+    SCase "t1 = t3".
+      destruct (excluded_middle (conflict evt3 evt2)).
+      SSCase "conflict evt3 evt2".
+        rewrite -> list_rearrange in Hmulti.
+        apply IHtlm in Hmulti...
+        inv Hmulti.
+        exists x.
+        right...
+      SSCase "~ conflict evt3 evt2".
+        (* TODO: (t1, evt1) :: (t1, evt3) :: ... :: (t2, evt2). It
+           cannot swap (t1, evt1) with (t1, evt3), and since evt3 &
+           evt2 do not conflict, it cannot use the induction
+           hypothesis. The only way seems to be (t2, evt2), but how to
+           do that? *)
+      Focus 2.
+    SCase "t1 <> t3".
+      destruct (excluded_middle (conflict evt1 evt3)).
+      SSCase "conflict evt1 evt3".
+        assert (exists lk, evt1 = EV_Unlock lk).
+          remember (tlm ++ (t2, evt2) :: trcr) as trcr'.
+          eapply drf_well_synchronized_weaker...
+        inv H0.
+        exists x; left...
+      SSCase "~ conflict evt1 evt3".
+        apply trace_segment in Hmulti.
+        inversion Hmulti as [cfgl H']; clear Hmulti; inv H'.
+        apply trace_extract in H1.
+        inversion H1 as [cfg1 H']; clear H1; inv H'.
+        apply trace_extract in H2.
+        inversion H2 as [cfg2 H']; clear H2; inv H'.
+        assert (exists cfg1', cfgl --SC> cfg1' [[(t3, evt3)]] /\
+                              cfg1' --SC> cfg2 [[(t1, evt1)]]).
+          eapply diamond...
+        inversion H4 as [cfg1' H']; clear H4; inv H'.
+        assert (cfg --SC>* cfg'
+                    [[trcl ++ (t3, evt3) :: (t1, evt1) :: tlm ++ (t2, evt2) :: trcr]]) as Hm'.
+          apply multi_trans with cfgl...
+        rewrite -> list_rearrange in Hm'.
+        apply IHtlm in Hm'...
+        inv Hm'; exists x.
+        inv H6. left...
+        right; right...
+(* Only the case when t1 = t3 /\ ~ conflict evt3 evt2 is not proved yet *)
+Admitted.
+(* ---------------- end of DRF -> Well-Synchronized ---------------- *)
+
+
 (* ---------------- DRF Guarantee Property ---------------- *)
 (* This is the ultimate theorem: "data race free programs have SC semantics" *)
 Fixpoint _flushall (b : buffer) (m : memory) : memory :=
@@ -1185,14 +1516,4 @@ Proof with eauto.
     (* TODO: Resume here *)
 Qed.
 (* ---------------- end of DRF Guarantee Property ---------------- *)
-
-
-(* ---------------- ?? ---------------- *)
-Theorem drf_must_have_unlock :
-  cfg -->* cfg' with a list of evts ->
-  in that list, (t1, evt1) < (t2, evt2) ->
-  evt1 and evt2 have data-race ->
-  exists (t1, unlock) between (t1, evt1) and (t2, evt2) in the list.
-(* Gustavo didn't prove this, so he's not sure about the difficulty,
-if hard, make this an axiom. *)
 
