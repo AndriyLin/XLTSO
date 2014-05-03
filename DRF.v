@@ -1443,6 +1443,13 @@ Proof with eauto.
         inv H6. left...
         right; right...
 (* Only the case when t1 = t3 /\ ~ conflict evt3 evt2 is not proved yet *)
+
+(* TODO: I come up with a premature solution:
+At the very beginning, given (t1, evt1) :: trcm ++ [(t2, evt2)], first
+reconstruct the trace such to the form of trcl :: (t1, evt1) :: trcm'
+++ (tr, evt2) :: trcr such that in trcm', every consecutive pair
+conflict (if not, it will get swapped). Then induction on trcm'.
+*)
 Admitted.
 (* ---------------- end of DRF -> Well-Synchronized ---------------- *)
 
