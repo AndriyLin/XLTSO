@@ -1226,12 +1226,41 @@ Proof with eauto.
     assert (t = t) as Hf by auto; apply H0 in Hf; invf Hf.
 Qed.
 
+Lemma try_to_unlock_unlocked :
+  forall t c c' mem mem' lks lks' lk,
+    t @ (ST c [] mem (unlock lks lk)) ==SC> (ST c' [] mem' lks') [[EV_Unlock lk]] ->
+    False.
+Proof with eauto.
+  intros.
+  remember (ST c [] mem (unlock lks lk)) as st1.
+  remember (ST c' [] mem' lks') as st2.
+  remember (EV_Unlock lk) as evt.
+  generalize dependent c;
+  generalize dependent c'; generalize dependent mem;
+  generalize dependent mem'; generalize dependent lks;
+  generalize dependent lks'; generalize dependent lk.
+  scstep_cases (induction H) Case;
+    intros; inversion Heqevt; inv Heqst1; inv Heqst2...
+  Case "SC_AssStep".
+    apply astep_event_read_or_none in H.
+    inv H.
+    inv H1; invf H.
+  Case "SC_IfStep".
+    apply bstep_event_read_or_none in H.
+    inv H.
+    inv H1; invf H.
+  Case "SC_Unlock".
+    unfold unlock in H.
+    rewrite -> lks_update_eq in H.
+    inv H.
+Qed.
+
 
 Theorem conflict_nor_drf :
-  forall cfg cfgl cfg1 cfg2 trcl t1 t2 evt1 evt2,
-    cfg --SC>* cfgl [[trcl]] ->
+  forall cfg cfg0 cfg1 cfg2 trcl t1 t2 evt1 evt2,
+    cfg --SC>* cfg0 [[trcl]] ->
     t1 <> t2 ->
-    cfgl --SC> cfg1 [[(t1, evt1)]] ->
+    cfg0 --SC> cfg1 [[(t1, evt1)]] ->
     cfg1 --SC> cfg2 [[(t2, evt2)]] ->
     conflict evt1 evt2 ->
     (forall lk, evt1 <> EV_Unlock lk) -> (* without this, it's not provable *)
@@ -1239,7 +1268,7 @@ Theorem conflict_nor_drf :
 Proof with eauto.
   intros.
   intros Hf.
-  destruct cfgl as [tids thds bufs mem lks].
+  destruct cfg0 as [tids thds bufs mem lks].
   assert (in_tids t1 tids = true) as Ht1.
     apply tevt_in_tids with [] [] thds bufs mem lks cfg1 evt1.
     eapply multi_step...
@@ -1316,13 +1345,13 @@ Hint Resolve conflict_nor_drf.
 
 (* This is the weaker version for theorem DRF->WellSynchronized,
 with nothing in between tevt1 & tevt2 *)
-Lemma drf_well_synchronized_weaker :
+Theorem drf_well_synchronized_weaker :
   forall cfg cfg' t1 t2 trcl trcr evt1 evt2,
     data_race_free cfg ->
     t1 <> t2 ->
     cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: (t2, evt2) :: trcr]] ->
     conflict evt1 evt2 ->
-    exists lk, evt1 = EV_Unlock lk.
+    exists lk, evt1 = EV_Unlock lk /\ evt2 = EV_Lock lk.
 Proof with eauto.
   intros cfg cfg' t1 t2 trcl trcr evt1 evt2 Hdrf Ht12 Hmulti Hcfl.
   apply trace_segment in Hmulti.
@@ -1335,28 +1364,19 @@ Proof with eauto.
   inversion Ht2' as [cfg2 H']; clear Ht2'.
   inversion H' as [Ht2 Hcfgr]; clear H'.
 
-  event_cases (destruct evt1) SCase.
-  SCase "EV_Read".
+  destruct (excluded_middle (exists lk, evt1 = EV_Unlock lk)).
+  Case "evt1 = EV_Unlock".
+    inversion H as [lk]; subst; clear H.
+    inversion Hcfl; subst...
+    inv Ht1; inv Ht2.
+    assert (mem = mem' /\ lks' = unlock lks lk).
+      eapply sc_event_unlock in H6...
+    inv H.
+    rewrite -> thds_update_neq in H13...
+    apply try_to_unlock_unlocked in H13; invf H13.
+  Case "evt1 <> EV_Unlock".
     assert (~ data_race_free cfg) as Hf.
       eapply conflict_nor_drf...
-      intros lk Hf; invf Hf.
-    apply Hf in Hdrf; invf Hdrf.
-  SCase "EV_Write".
-    assert (~ data_race_free cfg) as Hf.
-      eapply conflict_nor_drf...
-      intros lk Hf; invf Hf.
-    apply Hf in Hdrf; invf Hdrf.
-  SCase "EV_Lock".
-    assert (~ data_race_free cfg) as Hf.
-      eapply conflict_nor_drf...
-      intros lk Hf; invf Hf.
-    apply Hf in Hdrf; invf Hdrf.
-  SCase "EV_Unlock".
-    exists l...
-  SCase "EV_None".
-    assert (~ data_race_free cfg) as Hf.
-      eapply conflict_nor_drf...
-      intros lk Hf; invf Hf.
     apply Hf in Hdrf; invf Hdrf.
 Qed.
 
@@ -1371,6 +1391,33 @@ Proof with auto.
   rewrite -> IHtll...
 Qed.
 
+Theorem length_zero_nil :
+  forall (X : Type) (ls : list X),
+    0 = length ls -> ls = nil.
+Proof with auto.
+  intros.
+  induction ls...
+  inv H.
+Qed.
+
+
+Lemma transposition :
+  forall cfg cfg' trcl trcm trcr t1 t2 evt1 evt2,
+    t1 <> t2 ->
+    cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: trcm ++ (t2, evt2) :: trcr]] ->
+    ~ (exists lk, In (t1, EV_Unlock lk) ((t1, evt1) ::trcm)) ->
+    exists trcm1 trcm2,
+      cfg --SC>* cfg' [[trcl ++ trcm1 ++ (t2, evt2) :: (t1, evt1) :: trcm2 ++ trcr]].
+Proof.
+  Admitted.
+
+Theorem conflict_sym :
+  forall evt1 evt2,
+    conflict evt1 evt2 -> conflict evt2 evt1.
+Proof.
+  Admitted.
+
+
 (* Given a trace generated from a DRF program, if any two events in
 the trace conflict, there must be an Unlock event in the middle
 emitted by the first thread. *)
@@ -1383,46 +1430,72 @@ Theorem drf_well_synchronized :
     exists lk, In (t1, EV_Unlock lk) ((t1, evt1) :: trcm).
 Proof with eauto.
   intros cfg cfg' t1 t2 trcl trcm trcr evt1 evt2 Hdrf Ht12 Hmulti Hcfl.
+  remember (length trcm) as len.
   generalize dependent evt2; generalize dependent evt1;
+  generalize dependent trcm;
   generalize dependent trcr; generalize dependent trcl;
   generalize dependent t2; generalize dependent t1;
   generalize dependent cfg'; generalize dependent cfg.
-  induction trcm as [ | hdm tlm];
+  induction len;
     intros.
-  Case "trcm = nil".
+  Case "length trcm = 0".
+    apply length_zero_nil in Heqlen; subst...
     simpl in Hmulti.
-    assert (exists lk, evt1 = EV_Unlock lk).
-      eapply drf_well_synchronized_weaker...
-    inv H.
-    exists x.
-    left...
-  Case "trcm = hdm :: tlm".
-    simpl in Hmulti.
+    apply drf_well_synchronized_weaker in Hmulti...
+    inv Hmulti. inv H.
+    exists x; left...
+  Case "length trcm = S n".
+    destruct trcm as [ | hdm tlm].
+    inversion Heqlen.
     destruct hdm as [t3 evt3].
     destruct (eq_tid_dec t1 t3); subst.
     SCase "t1 = t3".
       destruct (excluded_middle (conflict evt3 evt2)).
       SSCase "conflict evt3 evt2".
-        rewrite -> list_rearrange in Hmulti.
-        apply IHtlm in Hmulti...
+        simpl in Hmulti; rewrite -> list_rearrange in Hmulti.
+        apply IHlen in Hmulti...
         inv Hmulti.
-        exists x.
-        right...
+        exists x; right...
       SSCase "~ conflict evt3 evt2".
         (* TODO: (t1, evt1) :: (t1, evt3) :: ... :: (t2, evt2). It
            cannot swap (t1, evt1) with (t1, evt3), and since evt3 &
            evt2 do not conflict, it cannot use the induction
            hypothesis. The only way seems to be (t2, evt2), but how to
            do that? *)
+
+    destruct (excluded_middle (exists lk, In (t1, EV_Unlock lk) ((t1, evt1) ::trcm)))...
+    assert (exists trcm1 trcm2, cfg --SC>* cfg'
+              [[trcl ++ trcm1 ++ (t2, evt2) :: (t1, evt1) :: trcm2 ++ trcr]]).
+      eapply transposition...
+    inversion H0 as [trcm1]; clear H0.
+    inversion H1 as [trcm2]; clear H1.
+    apply conflict_sym in Hcfl.
+    apply trace_segment in H0.
+    inversion H0 as [cfgl H']; clear H0; inv H'.
+    apply trace_segment in H1.
+    inversion H1 as [cfgm1 H']; clear H1; inv H'.
+    apply trace_extract in H2.
+    inversion H2 as [cfg2' H']; clear H2; inv H'.
+    apply trace_extract in H3.
+    inversion H3 as [cfg1' H']; clear H3; inv H'.
+    assert (cfg --SC>* cfgm1 [[trcl ++ trcm1]]).
+      eapply multi_trans...
+    assert (~ data_race_free cfg).
+      apply conflict_nor_drf with cfgm1 cfg2' cfg1' (trcl ++ trcm1) t2 t1 evt2 evt1...
+
+    replace (trcl ++ trcm1 ++ (t2, evt2)::
+    apply IHlen in H0.
+
+
       Focus 2.
     SCase "t1 <> t3".
       destruct (excluded_middle (conflict evt1 evt3)).
       SSCase "conflict evt1 evt3".
-        assert (exists lk, evt1 = EV_Unlock lk).
+        assert (exists lk, evt1 = EV_Unlock lk /\ evt3 = EV_Lock lk).
           remember (tlm ++ (t2, evt2) :: trcr) as trcr'.
           eapply drf_well_synchronized_weaker...
         inv H0.
-        exists x; left...
+        inv H1; exists x; left...
       SSCase "~ conflict evt1 evt3".
         apply trace_segment in Hmulti.
         inversion Hmulti as [cfgl H']; clear Hmulti; inv H'.
@@ -1438,11 +1511,11 @@ Proof with eauto.
                     [[trcl ++ (t3, evt3) :: (t1, evt1) :: tlm ++ (t2, evt2) :: trcr]]) as Hm'.
           apply multi_trans with cfgl...
         rewrite -> list_rearrange in Hm'.
-        apply IHtlm in Hm'...
+        apply IHlen in Hm'...
         inv Hm'; exists x.
         inv H6. left...
         right; right...
-(* Only the case when t1 = t3 /\ ~ conflict evt3 evt2 is not proved yet *)
+Qed.
 
 (* TODO: I come up with a premature solution:
 At the very beginning, given (t1, evt1) :: trcm ++ [(t2, evt2)], first
@@ -1454,10 +1527,7 @@ Or, change the "list (tid * event)" to "vector"?
 
 Or, as the paper suggests, by induction on the length of trcm?  Maybe
 this will work, but I have to prepare for the finals now.
-
-Before retrying, read the complete proof in the paper first!!
 *)
-Admitted.
 (* ---------------- end of DRF -> Well-Synchronized ---------------- *)
 
 
