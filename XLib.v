@@ -122,9 +122,9 @@ Definition hd {X} (l : list X) : option X :=
     | hd :: _ => Some hd
   end.
 
-Fixpoint append {X} (l : list X) (v : X) : list X :=
+Fixpoint snoc {X} (l : list X) (v : X) : list X :=
   match l with
     | nil => [v]
-    | h :: t => h :: append t v
+    | h :: t => h :: snoc t v
   end.
 

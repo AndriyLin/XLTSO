@@ -360,7 +360,7 @@ Definition buffer : Type := list (var * nat).
 
 (* Add a new write to the end of buffer *)
 Definition write (b : buffer) (x : var) (n : nat) : buffer :=
-  append b (x, n).
+  snoc b (x, n).
 
 Hint Unfold write.
 
