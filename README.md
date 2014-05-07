@@ -16,6 +16,10 @@ Xuankang LIN
 
 Contents:
 
+* XLib.v
+
+    1. Functions, Theorems, Axioms, Tactics, everything useful for the proofs
+
 * Basics.v
 
     1. Var
