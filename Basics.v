@@ -217,6 +217,20 @@ Definition add_tid : tid -> set tid -> set tid :=
 
 Definition remove_tid : tid -> set tid -> set tid :=
   set_remove eq_tid_dec.
+
+
+Theorem in_tids_neq :
+  forall t1 t2 tids,
+    t1 <> t2 ->
+    in_tids t1 (t2 :: tids) = in_tids t1 tids.
+Proof with auto.
+  intros.
+  unfold in_tids.
+  simpl.
+  rewrite neq_tid...
+Qed.
+
+Hint Resolve in_tids_neq.
 (* ---------------- end of 3. Thread ID ---------------- *)
 
 
@@ -419,6 +433,25 @@ Definition bufs_update (bufs : buffer_status) (t : tid) (b : buffer) : buffer_st
   fun t' => if eq_tid_dec t t' then b else bufs t'.
 
 Hint Unfold bufs_update.
+
+Theorem bufs_update_eq :
+  forall bufs t b,
+    bufs_update bufs t b t = b.
+Proof with auto.
+  intros.
+  unfold bufs_update.
+  rewrite eq_tid...
+Qed.
+
+Theorem bufs_update_neq :
+  forall bufs t1 b t2,
+    t1 <> t2 ->
+    bufs_update bufs t1 b t2 = bufs t2.
+Proof with auto.
+  intros.
+  unfold bufs_update.
+  rewrite -> neq_tid...
+Qed.
 
 
 Module TestWriteBuffer.
