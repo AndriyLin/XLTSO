@@ -4,6 +4,7 @@ Table of Contents:
 * Data-Race-Free
 * Diamond Lemma
 * DRF -> Well-Synchronized
+* Flatten & Coherent
 * DRF Guarantee Property
 
 * TODO.. to be numbered
@@ -1503,36 +1504,81 @@ Or, change the "list (tid * event)" to "vector"?
 (* ---------------- end of DRF -> Well-Synchronized ---------------- *)
 
 
-(* ---------------- DRF Guarantee Property ---------------- *)
-(* This is the ultimate theorem: "data race free programs have SC semantics" *)
-Fixpoint _flushall (b : buffer) (m : memory) : memory :=
+(* ---------------- Flatten & Coherent ---------------- *)
+Fixpoint _flush_all (b : buffer) (m : memory) : memory :=
   match b with
     | nil => m
-    | (x, n) :: t => _flushall t (mem_update m x n)
+    | (x, n) :: t => _flush_all t (mem_update m x n)
   end.
 
-Fixpoint _flattening (ts : list tid) (bufs : buffer_status) (m : memory) : memory :=
+Fixpoint _flatten_all (ts : list tid) (bufs : buffer_status) (m : memory) : memory :=
   match ts with
     | nil => m
-    | t :: ts' => _flattening ts' bufs (_flushall (bufs t) m)
+    | t :: ts' => _flatten_all ts' bufs (_flush_all (bufs t) m)
   end.
 
-Fixpoint flattening (cfg : configuration) : configuration :=
+Fixpoint flatten (cfg : configuration) : configuration :=
   match cfg with
     | CFG tids thds bufs mem lks =>
-      CFG tids thds bufs (_flattening tids bufs mem) lks
+      CFG tids thds empty_buffers (_flatten_all tids bufs mem) lks
   end.
 
-Lemma flattening_empty_buffers :
-  forall ts mem, _flattening ts empty_buffers mem = mem.
+Lemma flatten_empty_buffers :
+  forall ts mem, _flatten_all ts empty_buffers mem = mem.
 Proof with auto.
   intros ts.
   induction ts as [ | hd tl];
     intros; simpl...
 Qed.
 
-Hint Resolve flattening_empty_buffers.
+Hint Resolve flatten_empty_buffers.
 
+
+(* No concurrent buffered writes for the same reference in the
+configuration. There may be concurrent writes, but they concern
+distinct references. *)
+Definition coherent (cfg : configuration) : Prop :=
+  match cfg with
+    | CFG tids thds bufs mem lks =>
+      ~ exists t1 t2 x v1 v2, in_tids t1 tids = true /\ in_tids t2 tids = true /\
+                              get (bufs t1) x = Some v1 /\ get (bufs t2) x = Some v2
+  end.
+
+(* This is for Lemma 5.2 in the paper, I think they are using the
+smallstep relation so each step should preserve the coherent
+property. But I define it in a big-step functional way, the final
+result of course will be coherent *)
+Theorem coherent_preservation :
+  forall cfg cfg',
+    coherent cfg ->
+    flatten cfg = cfg' ->
+    coherent cfg'.
+Proof with auto.
+  intros.
+  inv H0.
+  destruct cfg as [tids thds bufs mem lks]; simpl in *.
+  intros Hf; inv Hf.
+  inv H0; inv H2; inv H0; inv H2; inv H0; inv H3; inv H4.
+  invf H3.
+Qed.
+
+(* This is for the Corollary 5.4 in the paper, stating that flatten
+relation is deterministic. But I write flatten as a function, so it
+should already be deterministic *)
+Theorem flatten_deterministic :
+  forall cfg cfg1 cfg2,
+    flatten cfg = cfg1 ->
+    flatten cfg = cfg2 ->
+    cfg1 = cfg2.
+Proof with auto.
+  intros.
+  inv H...
+Qed.
+(* ---------------- end of Flatten & Coherent ---------------- *)
+
+
+(* ---------------- DRF Guarantee Property ---------------- *)
+(* This is the ultimate theorem: "data race free programs have SC semantics" *)
 
 Inductive simulation : configuration -> configuration -> configuration -> Prop :=
 | Simulation : forall c0 ctso csc tr1 tr2,
