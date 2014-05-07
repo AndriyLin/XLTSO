@@ -1478,7 +1478,7 @@ Fixpoint _flattening (ts : list tid) (bufs : buffer_status) (m : memory) : memor
 Fixpoint flattening (cfg : configuration) : configuration :=
   match cfg with
     | CFG tids thds bufs mem lks =>
-      CFG tids thds bufs (_flattening tids bufs mem) lks
+      CFG tids thds empty_buffers (_flattening tids bufs mem) lks
   end.
 
 Lemma flattening_empty_buffers :
@@ -1491,43 +1491,6 @@ Qed.
 
 Hint Resolve flattening_empty_buffers.
 
-
-Inductive simulation : configuration -> configuration -> configuration -> Prop :=
-| Simulation : forall c0 ctso csc tr1 tr2,
-                 c0 -->* ctso [[tr1]] ->
-                 flattening ctso = csc ->
-                 c0 --SC>* csc [[tr2]] ->
-                 simulation c0 ctso csc
-.
-
-Hint Constructors simulation.
-
-
-Theorem drf_guarantee :
-  forall cfg ctso tr tids thds,
-    (* start from initial state *)
-    cfg = CFG tids thds empty_buffers empty_memory empty_locks ->
-    data_race_free cfg ->
-    cfg -->* ctso [[tr]]->
-    exists csc, simulation cfg ctso csc.
-Proof with eauto.
-  intros cfg ctso tr tids thds Hcfg Hdrf Htso.
-  generalize dependent thds; generalize dependent tids.
-(*
-  revert Hdrf. (* TODO: need this?? *)
-*)
-  multi_cases (induction Htso) Case;
-    intros.
-  Case "multi_refl".
-    rename x into cfg.
-    exists (flattening cfg).
-    inv Hcfg; inv H; simpl; rewrite -> flattening_empty_buffers.
-    apply Simulation with [] [].
-    apply multi_refl...
-    simpl; rewrite -> flattening_empty_buffers...
-    apply multi_refl...
-  Case "multi_step".
-    (* TODO: Resume here *)
-Qed.
+(* .... to be continued *)
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
