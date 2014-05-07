@@ -1580,11 +1580,72 @@ Qed.
 (* ---------------- DRF Guarantee Property ---------------- *)
 (* This is the ultimate theorem: "data race free programs have SC semantics" *)
 
-Inductive simulation : configuration -> configuration -> configuration -> Prop :=
-| Simulation : forall c0 ctso csc tr1 tr2,
-                 c0 -->* ctso [[tr1]] ->
-                 flattening ctso = csc ->
-                 c0 --SC>* csc [[tr2]] ->
+Inductive strong_configuration : configuration -> Prop :=
+| Strong : forall tids thds bufs mem lks,
+             (forall t, in_tids t tids = true ->
+                        bufs t = []) ->
+             strong_configuration (CFG tids thds bufs mem lks).
+
+Hint Constructors strong_configuration.
+
+Definition sequence : Type := list (configuration * (tid * event)).
+
+(* c0 after some sequence of execution, becomes c1 *)
+Inductive tso_execution : configuration -> sequence -> configuration -> Prop :=
+| TSOEx_Nil : forall cfg,
+                tso_execution cfg [] cfg
+
+| TSOEx_Cons : forall cfg0 cfg1 cfg tevt tr tl,
+                 cfg0 -->* cfg [[(tr ++ [tevt])]] ->
+                 tso_execution cfg tl cfg1 ->
+                 tso_execution cfg0 ((cfg, tevt) :: tl) cfg1
+.
+
+Hint Constructors tso_execution.
+
+Tactic Notation "tso_execution_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "TSOEx_Nil" | Case_aux c "TSOEx_Cons" ].
+
+
+Inductive sc_execution : configuration -> sequence -> configuration -> Prop :=
+| SCEx_Nil : forall cfg,
+               sc_execution cfg [] cfg
+
+| SCEx_Cons : forall cfg0 cfg1 cfg tevt tl,
+                cfg0 --SC> cfg [[tevt]] ->
+                sc_execution cfg tl cfg1 ->
+                sc_execution cfg0 ((cfg, tevt) :: tl) cfg1
+.
+
+Hint Constructors sc_execution.
+
+Tactic Notation "sc_execution_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "SCEx_Nil" | Case_aux c "SCEx_Cons" ].
+
+
+Inductive all_flattening : sequence -> sequence -> Prop :=
+| AF_Nil : all_flattening [] []
+| AF_Cons : forall cfgtso cfgsc tevt seqtso seqsc,
+              flatten cfgtso = cfgsc ->
+              all_flattening seqtso seqsc ->
+              all_flattening ((cfgtso, tevt) :: seqtso) ((cfgsc, tevt) :: seqsc)
+.
+
+Hint Constructors all_flattening.
+
+Tactic Notation "all_flattening_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "AF_Nil" | Case_aux c "AF_Cons" ].
+
+
+Inductive simulation (c0 : configuration) : configuration -> configuration -> Prop :=
+| Simulation : forall ctso csc seqtso seqsc,
+                 strong_configuration c0 ->
+                 tso_execution c0 seqtso ctso ->
+                 sc_execution c0 seqsc csc ->
+                 all_flattening seqtso seqsc ->
                  simulation c0 ctso csc
 .
 
@@ -1592,30 +1653,15 @@ Hint Constructors simulation.
 
 
 Theorem drf_guarantee :
-  forall cfg ctso tr tids thds,
-    (* start from initial state *)
-    cfg = CFG tids thds empty_buffers empty_memory empty_locks ->
+  forall cfg cfgtso cfgsc cfgtso' tr tevt,
     data_race_free cfg ->
-    cfg -->* ctso [[tr]]->
-    exists csc, simulation cfg ctso csc.
+    simulation cfg cfgtso cfgsc ->
+    coherent cfgtso ->
+    (* TODO: can do multi-step?? or just one step + many flush *)
+    cfgtso -->* cfgtso' [[(tr ++ [tevt])]] ->
+    exists cfgsc', cfgsc --SC> cfgsc' [[tevt]] /\ simulation cfg cfgtso' cfgsc'.
 Proof with eauto.
-  intros cfg ctso tr tids thds Hcfg Hdrf Htso.
-  generalize dependent thds; generalize dependent tids.
-(*
-  revert Hdrf. (* TODO: need this?? *)
-*)
-  multi_cases (induction Htso) Case;
-    intros.
-  Case "multi_refl".
-    rename x into cfg.
-    exists (flattening cfg).
-    inv Hcfg; inv H; simpl; rewrite -> flattening_empty_buffers.
-    apply Simulation with [] [].
-    apply multi_refl...
-    simpl; rewrite -> flattening_empty_buffers...
-    apply multi_refl...
-  Case "multi_step".
-    (* TODO: Resume here *)
+
 Qed.
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
