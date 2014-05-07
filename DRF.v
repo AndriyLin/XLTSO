@@ -1462,31 +1462,6 @@ Proof with eauto.
            evt2 do not conflict, it cannot use the induction
            hypothesis. The only way seems to be (t2, evt2), but how to
            do that? *)
-
-    destruct (excluded_middle (exists lk, In (t1, EV_Unlock lk) ((t1, evt1) ::trcm)))...
-    assert (exists trcm1 trcm2, cfg --SC>* cfg'
-              [[trcl ++ trcm1 ++ (t2, evt2) :: (t1, evt1) :: trcm2 ++ trcr]]).
-      eapply transposition...
-    inversion H0 as [trcm1]; clear H0.
-    inversion H1 as [trcm2]; clear H1.
-    apply conflict_sym in Hcfl.
-    apply trace_segment in H0.
-    inversion H0 as [cfgl H']; clear H0; inv H'.
-    apply trace_segment in H1.
-    inversion H1 as [cfgm1 H']; clear H1; inv H'.
-    apply trace_extract in H2.
-    inversion H2 as [cfg2' H']; clear H2; inv H'.
-    apply trace_extract in H3.
-    inversion H3 as [cfg1' H']; clear H3; inv H'.
-    assert (cfg --SC>* cfgm1 [[trcl ++ trcm1]]).
-      eapply multi_trans...
-    assert (~ data_race_free cfg).
-      apply conflict_nor_drf with cfgm1 cfg2' cfg1' (trcl ++ trcm1) t2 t1 evt2 evt1...
-
-    replace (trcl ++ trcm1 ++ (t2, evt2)::
-    apply IHlen in H0.
-
-
       Focus 2.
     SCase "t1 <> t3".
       destruct (excluded_middle (conflict evt1 evt3)).
@@ -1515,7 +1490,7 @@ Proof with eauto.
         inv Hm'; exists x.
         inv H6. left...
         right; right...
-Qed.
+Admitted.
 
 (* TODO: I come up with a premature solution:
 At the very beginning, given (t1, evt1) :: trcm ++ [(t2, evt2)], first
@@ -1524,9 +1499,6 @@ reconstruct the trace such to the form of trcl :: (t1, evt1) :: trcm'
 conflict (if not, it will get swapped). Then induction on trcm'.
 
 Or, change the "list (tid * event)" to "vector"?
-
-Or, as the paper suggests, by induction on the length of trcm?  Maybe
-this will work, but I have to prepare for the finals now.
 *)
 (* ---------------- end of DRF -> Well-Synchronized ---------------- *)
 
