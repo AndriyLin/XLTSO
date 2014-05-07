@@ -1400,22 +1400,213 @@ Proof with auto.
   inv H.
 Qed.
 
+(* (t1, evt1) :: trc ++ [(t2, evt2)], trc is the list in between (excluded) *)
+Inductive must_happen_before :
+  (tid * event) -> list (tid * event) -> (tid * event) -> Prop :=
+| MHB_Same :
+    forall t evt1 evt2 trc,
+      must_happen_before (t, evt1) trc (t, evt2)
+| MHB_Conflict :
+    forall t1 t2 evt1 evt2 trc,
+      t1 <> t2 ->
+      conflict evt1 evt2 ->
+      must_happen_before (t1, evt1) trc (t2, evt2)
+| MHB_Trans :
+    forall t1 t2 evt1 evt2 t' evt' trcl trcr,
+      (* it's fine without these two constraints, I just want to be more specific *)
+      t1 <> t2 ->
+      ~ (conflict evt1 evt2) ->
+      must_happen_before (t1, evt1) trcl (t', evt') ->
+      must_happen_before (t', evt') trcr (t2, evt2) ->
+      must_happen_before (t1, evt1) (trcl ++ (t', evt') :: trcr) (t2, evt2)
+.
+
+Hint Constructors must_happen_before.
+
+Theorem not_mhb_means :
+  forall t1 evt1 t2 evt2 trc,
+    ~ must_happen_before (t1, evt1) trc (t2, evt2) ->
+    ~ must_happen_before (t1, evt1) trc (t2, evt2) /\
+    t1 <> t2 /\ ~ conflict evt1 evt2 /\
+    ~ (exists t' evt' trcl trcr, trc = trcl ++ (t', evt') :: trcr /\
+                                 must_happen_before (t1, evt1) trcl (t', evt') /\
+                                 must_happen_before (t', evt') trcr (t2, evt2)).
+Proof with auto.
+  intros.
+  split...
+  destruct (eq_tid_dec t1 t2); subst...
+  split...
+  destruct (excluded_middle (conflict evt1 evt2))...
+  split...
+  destruct (excluded_middle (exists t' evt' trcl trcr, trc = trcl ++ (t', evt') :: trcr /\
+                                 must_happen_before (t1, evt1) trcl (t', evt') /\
+                                 must_happen_before (t', evt') trcr (t2, evt2)))...
+  inversion H1 as [t']; clear H1.
+  inversion H2 as [evt']; clear H2.
+  inversion H1 as [trcl]; clear H1.
+  inversion H2 as [trcr]; clear H2.
+  inv H1; inv H3.
+  assert (must_happen_before (t1, evt1) (trcl ++ (t', evt') :: trcr) (t2, evt2)) by auto.
+  apply H in H3; invf H3.
+Qed.
+
+Hint Resolve not_mhb_means.
+
+Theorem not_mhb_can_swap :
+  forall cfg cfg' trcl trcm trcr t1 evt1 t2 evt2,
+    cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: (t2, evt2) :: trcm ++ trcr]] ->
+    ~ must_happen_before (t1, evt1) [] (t2, evt2) ->
+    cfg --SC>* cfg' [[trcl ++ (t2, evt2) :: (t1, evt1) :: trcm ++ trcr]].
+Proof with eauto.
+  intros.
+  apply trace_segment in H;
+    inversion H as [cfg0 H']; clear H; inv H'.
+  apply trace_extract in H1;
+    inversion H1 as [cfg1 H']; clear H1; inv H'.
+  apply trace_extract in H2;
+    inversion H2 as [cfg2 H']; clear H2; inv H'.
+
+  assert (exists cfg1', cfg0 --SC> cfg1' [[(t2, evt2)]] /\ cfg1' --SC> cfg2 [[(t1, evt1)]]).
+    apply not_mhb_means in H0.
+    inv H0; inv H5.
+    eapply diamond...
+  inversion H4 as [cfg1' H']; clear H4; inv H'.
+  eapply multi_trans...
+Qed.
+
+Theorem mhb_longer :
+  forall t1 evt1 t2 evt2 h t,
+    must_happen_before (t1, evt1) t (t2, evt2) ->
+    must_happen_before (t1, evt1) (h :: t) (t2, evt2).
+Proof with auto.
+  intros.
+  induction H...
+  replace (h :: trcl ++ (t', evt') :: trcr) with ((h :: trcl) ++ (t', evt') :: trcr)...
+Qed.
+
+Hint Resolve mhb_longer.
+
+Theorem not_mhb_shorter :
+  forall t1 evt1 t2 evt2 h t,
+    ~ must_happen_before (t1, evt1) (h :: t) (t2, evt2) ->
+    ~ must_happen_before (t1, evt1) t (t2, evt2).
+Proof with auto.
+  intros.
+  intros Hf; apply H...
+Qed.
+
+Hint Resolve not_mhb_shorter.
+
+
+Lemma transposition_list_rearrange1 :
+  forall (X : Type) trcl (v : X) trcm1 rest,
+    trcl ++ v :: trcm1 ++ rest =
+    (trcl ++ [v]) ++ trcm1 ++ rest.
+Proof with auto.
+  intros.
+  induction trcl...
+  simpl.
+  rewrite -> IHtrcl...
+Qed.
+
+Lemma transposition_list_rearrange2 :
+  forall (X : Type) trcm2' (tevt1 : X) tevt' trcm2 trcr,
+    tevt1 :: (trcm2' ++ tevt' :: trcm2) ++ trcr =
+    tevt1 :: trcm2' ++ tevt' :: trcm2 ++ trcr.
+Proof with auto.
+  intros X trcm2'.
+  induction trcm2';
+    intros; simpl...
+  rewrite -> IHtrcm2'...
+Qed.
+
 
 Lemma transposition :
   forall cfg cfg' trcl trcm trcr t1 t2 evt1 evt2,
-    t1 <> t2 ->
     cfg --SC>* cfg' [[trcl ++ (t1, evt1) :: trcm ++ (t2, evt2) :: trcr]] ->
-    ~ (exists lk, In (t1, EV_Unlock lk) ((t1, evt1) ::trcm)) ->
+    ~ (must_happen_before (t1, evt1) trcm (t2, evt2)) ->
     exists trcm1 trcm2,
       cfg --SC>* cfg' [[trcl ++ trcm1 ++ (t2, evt2) :: (t1, evt1) :: trcm2 ++ trcr]].
-Proof.
-  Admitted.
+(*
+      /\ ~ (must_happen_before (t1, evt1) trcm1 (t2, evt2))
+      /\ ~ (must_happen_before (t1, evt1) trcm2 (t2, evt2)).
+*)
+Proof with eauto.
+  intros cfg cfg' trcl trcm trcr t1 t2 evt1 evt2 Hmulti Hmhb.
+  remember (length trcm) as len.
+  generalize dependent cfg; generalize dependent cfg';
+  generalize dependent trcl; generalize dependent trcm;
+  generalize dependent trcr; generalize dependent t1;
+  generalize dependent t2; generalize dependent evt1;
+  generalize dependent evt2.
+  induction len;
+    intros.
+  Case "length trcm = 0".
+    apply length_zero_nil in Heqlen; subst.
+    simpl in Hmulti.
+    exists []; exists []; simpl.
+    apply trace_segment in Hmulti;
+    inversion Hmulti as [cfg0 H']; clear Hmulti; inv H'.
+    apply trace_extract in H0;
+    inversion H0 as [cfg1 H']; clear H0; inv H'.
+    apply trace_extract in H1;
+    inversion H1 as [cfg2 H']; clear H1; inv H'.
+    assert (exists cfg1', cfg0 --SC> cfg1' [[(t2, evt2)]] /\ cfg1' --SC> cfg2 [[(t1, evt1)]]).
+      apply not_mhb_means in Hmhb.
+      inv Hmhb; inv H4; inv H6.
+      eapply diamond...
+    inversion H3 as [cfg1' H']; clear H3; inv H'.
+    eapply multi_trans...
+  Case "length trcm = S len".
+    apply not_mhb_means in Hmhb.
+    inv Hmhb; inv H0; inv H2.
+    destruct trcm as [ | hdm tlm].
+    inversion Heqlen.
+    destruct hdm as [t' evt'].
+    destruct (excluded_middle (must_happen_before (t', evt') tlm (t2, evt2))).
+    SCase "(t', evt') must happen before (t2, evt2)".
+      destruct (excluded_middle (must_happen_before (t1, evt1) [] (t', evt'))).
+      assert (must_happen_before (t1, evt1) ((t', evt') :: tlm) (t2, evt2)) as Hf.
+        replace ((t', evt') :: tlm) with ([] ++ (t', evt') :: tlm)...
+      apply H in Hf; invf Hf.
+      SSCase "~ must_happen_before (t1, evt1) [] (t', evt')".
+      simpl in Hmulti.
+      eapply not_mhb_can_swap in Hmulti...
+      rewrite -> list_rearrange in Hmulti.
+      apply IHlen in Hmulti...
+      inversion Hmulti as [trcm1]; clear Hmulti.
+      inversion H5 as [trcm2]; clear H5.
+      exists ((t', evt') :: trcm1); exists trcm2.
+      simpl; rewrite -> transposition_list_rearrange1...
+    SCase "~ (t', evt') must happen before (t2, evt2)".
+      rewrite -> transposition_list_rearrange1 in Hmulti.
+      apply IHlen in Hmulti...
+      inversion Hmulti as [trcm1]; clear Hmulti.
+      inversion H4 as [trcm2]; clear H4.
+      rewrite <- transposition_list_rearrange1 in H5; apply IHlen in H5...
+      inversion H5 as [trcm1']; clear H5.
+      inversion H4 as [trcm2']; clear H4.
+      exists trcm1'; exists (trcm2' ++ (t', evt') :: trcm2).
+      rewrite -> transposition_list_rearrange2...
+(* TODO
+I don't know how to make a step. It's obvious that trcm1 is part of
+trcm, but I don't have any relation like "subpart" to pass down the
+~mhb property.
+
+Even if I managed to prove this, I won't be able to prove the 2nd
+goal: len = length trcm1. It's obvious that trcm1 may not be just one
+element less than trcm. So get stuck here.
+*)
+      Focus 2.
+Qed.
 
 Theorem conflict_sym :
   forall evt1 evt2,
     conflict evt1 evt2 -> conflict evt2 evt1.
-Proof.
-  Admitted.
+Proof with auto.
+  intros.
+  inv H...
+Qed.
 
 
 (* Given a trace generated from a DRF program, if any two events in
@@ -1457,13 +1648,19 @@ Proof with eauto.
         inv Hmulti.
         exists x; right...
       SSCase "~ conflict evt3 evt2".
-        (* TODO: (t1, evt1) :: (t1, evt3) :: ... :: (t2, evt2). It
-           cannot swap (t1, evt1) with (t1, evt3), and since evt3 &
-           evt2 do not conflict, it cannot use the induction
-           hypothesis. The only way seems to be (t2, evt2), but how to
-           do that? *)
+        rename t3 into t1.
+        (* TODO: Start here *)
+        
 
-    destruct (excluded_middle (exists lk, In (t1, EV_Unlock lk) ((t1, evt1) ::trcm)))...
+        simpl in Hmulti; rewrite -> list_rearrange in Hmulti.
+        destruct (excluded_middle (exists lk, In (t1, EV_Unlock lk) ((t1, evt3) :: tlm)))...
+        SSSCase "there is EV_Unlock in [(t1, evt3) :: tlm]".
+          inv H0.
+          exists x; right...
+        SSSCase "there is no EV_Unlock in [(t1, evt3) :: tlm]".
+          apply transposition in Hmulti...
+          
+
     assert (exists trcm1 trcm2, cfg --SC>* cfg'
               [[trcl ++ trcm1 ++ (t2, evt2) :: (t1, evt1) :: trcm2 ++ trcr]]).
       eapply transposition...
@@ -1487,6 +1684,12 @@ Proof with eauto.
     apply IHlen in H0.
 
 
+
+        (* TODO: (t1, evt1) :: (t1, evt3) :: ... :: (t2, evt2). It
+           cannot swap (t1, evt1) with (t1, evt3), and since evt3 &
+           evt2 do not conflict, it cannot use the induction
+           hypothesis. The only way seems to be (t2, evt2), but how to
+           do that? *)
       Focus 2.
     SCase "t1 <> t3".
       destruct (excluded_middle (conflict evt1 evt3)).
@@ -1519,7 +1722,7 @@ Qed.
 
 (* TODO: I come up with a premature solution:
 At the very beginning, given (t1, evt1) :: trcm ++ [(t2, evt2)], first
-reconstruct the trace such to the form of trcl :: (t1, evt1) :: trcm'
+reconstruct the trace to the form of trcl :: (t1, evt1) :: trcm'
 ++ (tr, evt2) :: trcr such that in trcm', every consecutive pair
 conflict (if not, it will get swapped). Then induction on trcm'.
 
