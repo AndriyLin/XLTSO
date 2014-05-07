@@ -9,6 +9,7 @@ Table of Contents:
 * TODO.. to be numbered
 *)
 
+Require Import Coq.Lists.ListSet.
 Require Import XLib.
 Require Import Basics.
 Require Import TSO.
@@ -1511,34 +1512,194 @@ Fixpoint _flushall (b : buffer) (m : memory) : memory :=
     | (x, n) :: t => _flushall t (mem_update m x n)
   end.
 
-Fixpoint _flattening (ts : list tid) (bufs : buffer_status) (m : memory) : memory :=
-  match ts with
-    | nil => m
-    | t :: ts' => _flattening ts' bufs (_flushall (bufs t) m)
-  end.
+Inductive flatten_step : buffer -> memory -> buffer -> memory -> Prop :=
+| FS_Flush : forall buf mem x n,
+               oldest buf = Some (x, n) ->
+               flatten_step buf mem [] (_flushall buf mem)
+.
 
-Fixpoint flattening (cfg : configuration) : configuration :=
-  match cfg with
-    | CFG tids thds bufs mem lks =>
-      CFG tids thds bufs (_flattening tids bufs mem) lks
-  end.
+Hint Constructors flatten_step.
 
-Lemma flattening_empty_buffers :
-  forall ts mem, _flattening ts empty_buffers mem = mem.
+
+Inductive flatten_normal_form : configuration -> Prop :=
+| FNF_Each : forall tids thds bufs mem lks,
+               (forall t, in_tids t tids = true ->
+                          bufs t = []) ->
+               flatten_normal_form (CFG tids thds bufs mem lks).
+
+Hint Constructors flatten_normal_form.
+
+
+Reserved Notation "cfg1 '\\' cfg2" (at level 50).
+
+Inductive flatten_cfg : configuration -> configuration -> Prop :=
+| FC_Head : forall t tids thds bufs mem lks b' mem',
+              flatten_normal_form (CFG tids thds bufs mem lks) ->
+              flatten_step (bufs t) mem b' mem' ->
+              (CFG (t :: tids) thds bufs mem lks) \\
+                (CFG (t :: tids) thds (bufs_update bufs t b') mem' lks)
+
+| FC_Tail : forall t tids thds bufs bufs' mem mem' lks,
+              (CFG tids thds bufs mem lks) \\ (CFG tids thds bufs' mem' lks) ->
+              (CFG (t :: tids) thds bufs mem lks) \\
+                (CFG (t :: tids) thds bufs' mem' lks)
+
+where "cfg1 '\\' cfg2" := (flatten_cfg cfg1 cfg2).
+
+Hint Constructors flatten_cfg.
+
+Tactic Notation "flatten_cfg_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "FC_Head" | Case_aux c "FC_Tail" ].
+
+
+Reserved Notation "cfg1 '\\*' cfg2" (at level 50).
+
+Inductive multi_flatten : configuration -> configuration -> Prop :=
+| MF_refl  : forall cfg,
+               cfg \\* cfg
+| MF_step : forall cfg0 cfg1 cfg2,
+              cfg0 \\ cfg1 ->
+              cfg1 \\* cfg2 ->
+              cfg0 \\* cfg2
+
+where "cfg1 '\\*' cfg2" := (multi_flatten cfg1 cfg2).
+
+Hint Constructors multi_flatten.
+
+Tactic Notation "multi_flatten_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "MF_refl" | Case_aux c "MF_step" ].
+
+
+Lemma try_to_flatten_normal_form :
+  forall cfg cfg',
+    flatten_normal_form cfg ->
+    cfg \\ cfg' ->
+    False.
 Proof with auto.
-  intros ts.
-  induction ts as [ | hd tl];
-    intros; simpl...
+  intros cfg.
+  destruct cfg as [tids thds bufs mem lks].
+  generalize dependent thds; generalize dependent bufs;
+  generalize dependent mem; generalize dependent lks.
+  induction tids as [ | hd tl];
+    intros.
+  Case "tids = nil".
+    inv H0.
+  Case "tids = hd :: tl".
+    inversion H; subst.
+    inv H0.
+    SCase "tail are all normal_form".
+      inv H9.
+      rewrite -> H2 in H10...
+      inv H10. invf H0.
+      simpl; rewrite -> eq_tid...
+    SCase "tail can make a step".
+      eapply IHtl with (lks := lks) (mem := mem) (bufs := bufs) (thds := thds)...
+      constructor.
+      intros t Ht.
+      apply H2.
+      simpl; destruct (eq_tid_dec t hd)...
+      apply H9.
 Qed.
 
-Hint Resolve flattening_empty_buffers.
+
+Definition coherent (cfg : configuration) : Prop :=
+  match cfg with
+    | CFG tids thds bufs mem lks =>
+      ~ exists t1 t2 x v1 v2, in_tids t1 tids = true /\ in_tids t2 tids = true /\
+                              get (bufs t1) x = Some v1 /\ get (bufs t2) x = Some v2
+  end.
+
+
+
+Theorem coherent_preservation_one :
+  forall cfg cfg',
+    coherent cfg ->
+    cfg \\ cfg' ->
+    coherent cfg'.
+Proof with auto.
+  intros.
+  inv H0.
+  unfold coherent in H.
+  inv H2.
+  intros Hf.
+  inversion Hf as [t1 H']; clear Hf.
+  inversion H' as [t2 Hf]; clear H'.
+  inversion Hf as [v H']; clear Hf.
+  inversion H' as [val1 Hf]; clear H'.
+  inversion Hf as [val2 H']; clear Hf.
+  inv H'.
+  inv H3.
+  inv H5.
+  destruct (eq_tid_dec t t1); subst.
+  Case "t = t1".
+    rewrite -> bufs_update_eq in H3; invf H3.
+  Case "t <> t1".
+    destruct (eq_tid_dec t t2); subst.
+    rewrite -> bufs_update_eq in H6; invf H6.
+    rewrite -> bufs_update_neq in H3...
+    rewrite -> bufs_update_neq in H6...
+    assert (exists t1 t2 x v1 v2, in_tids t1 (t :: tids) = true /\
+                                  in_tids t2 (t :: tids) = true /\
+                                  get (bufs t1) x = Some v1 /\ get (bufs t2) x = Some v2).
+      exists t1; exists t2; exists v; exists val1; exists val2.
+      split; try split...
+    apply H in H5; invf H5.
+
+Qed.
+
+Hint Resolve coherent_preservation_one.
+
+Theorem coherent_preservation_multi :
+  forall cfg cfg',
+    coherent cfg ->
+    cfg \\* cfg' ->
+    coherent cfg'.
+Proof with eauto.
+  intros.
+  multi_flatten_cases (induction H0) Case...
+Qed.
+
+Hint Resolve coherent_preservation_multi.
+
+Theorem coherent_flattening_deterministic :
+  forall cfg cfg1 cfg2,
+    coherent cfg ->
+    cfg \\* cfg1 ->
+    flatten_normal_form cfg1 ->
+    cfg \\* cfg2 ->
+    flatten_normal_form cfg2 ->
+    cfg1 = cfg2.
+Proof with eauto.
+  intros cfg cfg1 cfg2 Hch Hf1 Hfnf1 Hf2 Hfnf2.
+  generalize dependent cfg2.
+  multi_flatten_cases (induction Hf1) Case;
+    intros.
+  Case "MF_refl".
+    multi_flatten_cases (induction Hf2) SCase...
+    SCase "MF_step".
+      eapply normal_form_still_flatten in Hfnf1...
+      invf Hfnf1.
+  Case "MF_step".
+    multi_flatten_cases (induction Hf2) SCase.
+    SCase "MF_refl".
+      eapply normal_form_still_flatten in Hfnf2...
+      invf Hfnf2.
+    SCase "MF_step".
+      assert (coherent cfg1) by eauto.
+      remember (IHHf1 H1 Hfnf1).
+      
+
+      apply IHHf2.
+Qed.
 
 
 Inductive simulation : configuration -> configuration -> configuration -> Prop :=
 | Simulation : forall c0 ctso csc tr1 tr2,
                  c0 -->* ctso [[tr1]] ->
-                 flattening ctso = csc ->
                  c0 --SC>* csc [[tr2]] ->
+                 flattening ctso = csc ->
                  simulation c0 ctso csc
 .
 
@@ -1566,10 +1727,10 @@ Proof with eauto.
     inv Hcfg; inv H; simpl; rewrite -> flattening_empty_buffers.
     apply Simulation with [] [].
     apply multi_refl...
-    simpl; rewrite -> flattening_empty_buffers...
     apply multi_refl...
+    simpl; rewrite -> flattening_empty_buffers...
   Case "multi_step".
-    (* TODO: Resume here *)
+
 Qed.
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
