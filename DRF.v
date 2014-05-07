@@ -1544,6 +1544,8 @@ Definition coherent (cfg : configuration) : Prop :=
                               get (bufs t1) x = Some v1 /\ get (bufs t2) x = Some v2
   end.
 
+(* TODO: now that I defined flushed_some relation, need I change some theorems here? *)
+
 (* This is for Lemma 5.2 in the paper, I think they are using the
 smallstep relation so each step should preserve the coherent
 property. But I define it in a big-step functional way, the final
@@ -1580,22 +1582,65 @@ Qed.
 (* ---------------- DRF Guarantee Property ---------------- *)
 (* This is the ultimate theorem: "data race free programs have SC semantics" *)
 
-Inductive strong_configuration : configuration -> Prop :=
-| Strong : forall tids thds bufs mem lks,
-             (forall t, in_tids t tids = true ->
-                        bufs t = []) ->
-             strong_configuration (CFG tids thds bufs mem lks).
+(* The configuration just does a TSO_FlushOne operation *)
+Inductive flushed_one : configuration -> configuration -> Prop :=
+| Flushed_One : forall t tids thds bufs c b mem lks x n,
+                  in_tids t tids = true ->
+                  thds t = c ->
+                  bufs t = b ->
+                  oldest b = Some (x, n) ->
+                  flushed_one (CFG tids thds bufs mem lks)
+                              (CFG tids
+                                   (* this is for consisitency with that in TSO semantics *)
+                                   (thds_update thds t c)
+                                   (bufs_update bufs t (flushone b))
+                                   (mem_update mem x n)
+                                   lks)
+.
 
-Hint Constructors strong_configuration.
+Hint Constructors flushed_one.
+
+Theorem flushed_one_is_tso_step :
+  forall cfg cfg',
+    flushed_one cfg cfg' ->
+    exists t, cfg --> cfg' [[(t, EV_None)]].
+Proof with eauto.
+  intros.
+  inv H.
+  exists t...
+Qed.
+
+Inductive flushed_some : configuration -> configuration -> Prop :=
+| Flushed_None : forall cfg,
+                   flushed_some cfg cfg
+| Flushed_Some : forall cfg1 cfg' cfg2,
+                   flushed_one cfg1 cfg' ->
+                   flushed_some cfg' cfg2 ->
+                   flushed_some cfg1 cfg2
+.
+
+Hint Constructors flushed_some.
+
+Tactic Notation "flushed_some_cases" tactic(first) ident(c) :=
+  first;
+  [ Case_aux c "Flushed_None" | Case_aux c "Flushed_Some" ].
+
 
 Definition sequence : Type := list (configuration * (tid * event)).
 
 (* c0 after some sequence of execution, becomes c1 *)
+
+(* TODO: Resume here, now that I have defined flushed_some, redefine below
+I may need to add one event "EV_FLush" to event and say that the tevt is not EV_Flush.
+ *)
 Inductive tso_execution : configuration -> sequence -> configuration -> Prop :=
 | TSOEx_Nil : forall cfg,
                 tso_execution cfg [] cfg
 
-| TSOEx_Cons : forall cfg0 cfg1 cfg tevt tr tl,
+| TSOEx_Cons : forall cfg0 cfg0' cfg1 ,
+                 flushed_some cfg0 cfg0' ->
+                 cfg0' --> cfg1 [[tevt]] ->
+
                  cfg0 -->* cfg [[(tr ++ [tevt])]] ->
                  tso_execution cfg tl cfg1 ->
                  tso_execution cfg0 ((cfg, tevt) :: tl) cfg1
@@ -1639,6 +1684,14 @@ Tactic Notation "all_flattening_cases" tactic(first) ident(c) :=
   first;
   [ Case_aux c "AF_Nil" | Case_aux c "AF_Cons" ].
 
+
+Inductive strong_configuration : configuration -> Prop :=
+| Strong : forall tids thds bufs mem lks,
+             (forall t, in_tids t tids = true ->
+                        bufs t = []) ->
+             strong_configuration (CFG tids thds bufs mem lks).
+
+Hint Constructors strong_configuration.
 
 Inductive simulation (c0 : configuration) : configuration -> configuration -> Prop :=
 | Simulation : forall ctso csc seqtso seqsc,
