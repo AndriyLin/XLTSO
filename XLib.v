@@ -128,3 +128,22 @@ Fixpoint snoc {X} (l : list X) (v : X) : list X :=
     | h :: t => h :: snoc t v
   end.
 
+(* ---------------------------------------------------------------- *)
+(* Strong induction, required by many proofs in the project *)
+Theorem strong_induction :
+  forall P : nat -> Prop,
+    (forall x, (forall y, y < x -> P y) -> P x) ->
+    forall a, P a.
+Proof with auto.
+  intros.
+  apply H.
+  induction a as [ | a'];
+    intros.
+  Case "a = 0".
+    inversion H0.
+  Case "a = S a'".
+    apply H; intros.
+    apply IHa'.
+    omega.
+Qed.
+
