@@ -1,5 +1,9 @@
 (* DRF.v defines lemmas and theorems for the DRF Guarantee Theorem
 
+This is the project of my CS565 Programming Languages course in
+14spring. This is currently suspended.
+
+
 Table of Contents:
 * Data-Race-Free
 * Diamond Lemma
@@ -1633,6 +1637,8 @@ Definition sequence : Type := list (configuration * (tid * event)).
 (* TODO: Resume here, now that I have defined flushed_some, redefine below
 I may need to add one event "EV_FLush" to event and say that the tevt is not EV_Flush.
  *)
+
+(*
 Inductive tso_execution : configuration -> sequence -> configuration -> Prop :=
 | TSOEx_Nil : forall cfg,
                 tso_execution cfg [] cfg
@@ -1716,5 +1722,6 @@ Theorem drf_guarantee :
 Proof with eauto.
 
 Qed.
+*)
 (* ---------------- end of DRF Guarantee Property ---------------- *)
 
